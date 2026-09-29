@@ -1,7 +1,8 @@
 // Settings: the songwriter connection, music folders, genre tags and the sidebar's starting tab.
 import { audioDir, join } from '@tauri-apps/api/path';
 import { message, open as pickFolder } from '@tauri-apps/plugin-dialog';
-import { api, errText, type McpInfo, type UpdateInfo } from '../api';
+import { api, errText, type McpInfo, type SpeechSettings, type UpdateInfo } from '../api';
+import { comboOf, DEFAULT_KEYS, keyLabel } from './assistant';
 import { applyLineColor, applySkin, LINE_COLORS, SKINS } from '../player';
 import { appleStatus, connectApple, disconnectApple, forgetAppleKey, isConnected, musicKit, setAppleKey, type AppleStatus } from '../apple';
 import { libraryFolder, reload, rerender, saveSetting, state } from '../state';
@@ -28,6 +29,7 @@ export async function addMusicFolder() {
 }
 
 let updates: UpdateInfo = { canUpdate: false, currentVersion: '', defaultUrl: '' };
+let speech: SpeechSettings = { baseUrl: '', model: '', language: '', hasKey: false };
 let mcp: McpInfo = { enabled: false, running: false, url: '', error: null };
 let apple: AppleStatus = { ready: false, builtIn: false, keyId: '', teamId: '' };
 
@@ -81,6 +83,7 @@ export async function openSettings(section?: 'writer') {
   state.writer = await api.writerConfig();
   updates = await api.updateInfo();
   mcp = await api.mcpInfo().catch(() => mcp);
+  speech = await api.speechSettings().catch(() => speech);
   apple = await appleStatus().catch(() => apple);
   if (apple.ready) await musicKit().catch(() => {});
   render();
@@ -96,8 +99,8 @@ function render() {
     <div class="row" style="justify-content:space-between"><h2 id="setTitle">Settings</h2><button class="btn" id="setClose">Done</button></div>
 
     <section class="set-sec">
-      <h3>Songwriter</h3>
-      <p class="muted small">Songs are written by any AI that speaks the OpenAI chat format: a model on your own computer or network (LM Studio, Ollama, vLLM) or a hosted service. Your key is kept in the system keychain.</p>
+      <h3>Your AI</h3>
+      <p class="muted small">Writes your songs and runs the assistant. Any AI that speaks the OpenAI chat format works: a model on your own computer or network (LM Studio, Ollama, vLLM) or a hosted service. For the assistant, pick a model that supports tool calling. Your key is kept in the system keychain.</p>
       <div class="form">
         <label for="wName">Name</label><input id="wName" value="${esc(w.name)}" placeholder="Bard">
         <label for="wUrl">Address</label><input id="wUrl" value="${esc(w.baseUrl)}" placeholder="http://localhost:1234/v1">
@@ -107,6 +110,28 @@ function render() {
       <label class="row small"><input type="checkbox" id="wExclude" ${state.settings.writerExclude ? 'checked' : ''}> Also write Suno's Exclude styles (under More Options in Suno)</label>
       <datalist id="wModels"></datalist>
       <div class="row"><button class="btn" id="wCheck">Check connection</button><button class="btn primary" id="wSave">Save songwriter</button>${w.hasKey ? '<button class="btn small" id="wForget">Remove saved key</button>' : ''}<span class="muted small" id="wStatus"></span></div>
+    </section>
+
+    <section class="set-sec">
+      <h3>Assistant</h3>
+      <p class="muted small">A chat with your AI that can run the app for you: find and play music, build playlists to your taste, tidy genres and song details, write songs. Open it with the Assistant button or your shortcut. Click a shortcut, then press the keys you want.</p>
+      <div class="form">
+        <label>Open the assistant</label><button class="btn keycap" data-keycap="assistantKey">${esc(keyLabel((state.settings.assistantKey as string) ?? DEFAULT_KEYS.assistantKey))}</button>
+        <label>Talk to it</label><button class="btn keycap" data-keycap="voiceKey">${esc(keyLabel((state.settings.voiceKey as string) ?? DEFAULT_KEYS.voiceKey))}</button>
+      </div>
+      <p class="muted small">Other apps and voice assistants can ask it too, and open Lute &amp; Tavern if it is closed, with a link such as <code>luteandtavern://ask?text=play my road trip playlist</code> (for example from Apple Shortcuts or Siri).</p>
+    </section>
+
+    <section class="set-sec">
+      <h3>Voice</h3>
+      <p class="muted small">To talk instead of type, point this at a Whisper speech-to-text server: one on your own computer (faster-whisper-server, Speaches, whisper.cpp's server and others) or a hosted one (OpenAI, Groq). Anything that answers the Whisper transcription API works. The key is kept in the system keychain.</p>
+      <div class="form">
+        <label for="vUrl">Address</label><input id="vUrl" value="${esc(speech.baseUrl)}" placeholder="http://localhost:8000/v1">
+        <label for="vModel">Model</label><input id="vModel" value="${esc(speech.model)}" placeholder="whisper-1">
+        <label for="vLang">Language</label><input id="vLang" value="${esc(speech.language)}" placeholder="Leave empty to detect it (or en, es, de…)">
+        <label for="vKey">API key</label><input id="vKey" type="password" autocomplete="off" placeholder="${speech.hasKey ? 'Saved in your keychain. Type to replace it.' : 'Only needed for hosted services'}">
+      </div>
+      <div class="row"><button class="btn primary" id="vSave">Save voice</button>${speech.hasKey ? '<button class="btn small" id="vForget">Remove saved key</button>' : ''}<span class="muted small" id="vStatus"></span></div>
     </section>
 
     <section class="set-sec">
@@ -346,6 +371,48 @@ function render() {
     }
     btn.disabled = false;
   };
+  document.querySelectorAll<HTMLButtonElement>('[data-keycap]').forEach((b) => {
+    b.onclick = () => {
+      b.textContent = 'Press the keys…';
+      const done = async (e: KeyboardEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.key === 'Escape') return finish();
+        const c = comboOf(e);
+        if (!c) return;
+        if (!c.includes('Mod') && !c.includes('Ctrl') && !c.includes('Alt')) {
+          b.textContent = 'Use a modifier key too';
+          return;
+        }
+        await saveSetting(b.dataset.keycap!, c);
+        finish();
+      };
+      const finish = () => {
+        b.removeEventListener('keydown', done, true);
+        render();
+      };
+      b.addEventListener('keydown', done, true);
+      b.addEventListener('blur', finish, { once: true });
+    };
+  });
+  const vStatus = (t: string) => ($('#vStatus').textContent = t);
+  $('#vSave').onclick = async () => {
+    const key = $<HTMLInputElement>('#vKey').value;
+    try {
+      await api.setSpeechSettings($<HTMLInputElement>('#vUrl').value, $<HTMLInputElement>('#vModel').value, $<HTMLInputElement>('#vLang').value, key || null);
+      speech = await api.speechSettings();
+      render();
+      toast('Voice saved');
+    } catch (e) {
+      vStatus(errText(e));
+    }
+  };
+  document.getElementById('vForget')?.addEventListener('click', async () => {
+    await api.setSpeechSettings(speech.baseUrl, speech.model, speech.language, '').catch((e) => toast(errText(e)));
+    speech = await api.speechSettings();
+    render();
+    toast('Key removed from your keychain');
+  });
   $('#wExclude').onchange = (e) => void saveSetting('writerExclude', (e.target as HTMLInputElement).checked);
   $('#mcpOn').onchange = async (e) => {
     mcp = await api.mcpSetEnabled((e.target as HTMLInputElement).checked).catch((err) => ({ ...mcp, error: errText(err) }));

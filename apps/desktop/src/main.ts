@@ -15,6 +15,7 @@ import { api, errText } from './api';
 import { aiControl, cycleRepeat, initPlayer, initQueue, refreshQueue, restoreNowPlaying, step, stop, togglePlay } from './player';
 import { onRender, reload, state, visible, writerName } from './state';
 import { initLibrary, renderChips, renderGrid, renderHead, renderSide } from './ui/library';
+import { initAssistant } from './ui/assistant';
 import { addMusicFolder, addSongsToLibrary, checkForUpdatesAtStart, chooseLibrary, openSettings } from './ui/settings';
 import { initSheetKeys } from './ui/sheet';
 import { initApple } from './ui/apple';
@@ -163,6 +164,7 @@ async function boot() {
   startVisualizer($<HTMLCanvasElement>('#viz'));
   await initEvents();
   await initDragDrop();
+  await initAssistant();
   void checkForUpdatesAtStart();
 }
 

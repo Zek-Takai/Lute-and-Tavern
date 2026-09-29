@@ -41,6 +41,8 @@ export interface Song {
   /** Artwork URL template from the service ({w}x{h}). */
   artUrl: string | null;
 }
+export interface ChatLine { id: number; role: 'user' | 'assistant' | 'action'; text: string; createdAt: number }
+export interface SpeechSettings { baseUrl: string; model: string; language: string; hasKey: boolean }
 export interface McpInfo { enabled: boolean; running: boolean; url: string; error: string | null }
 export interface Take { id: number; name: string; origin: string; addedAt: number; versionId: number | null }
 export interface Version { id: number; label: string; note: string; createdAt: number }
@@ -102,6 +104,13 @@ export const api = {
   logEvent: (level: string, message: string) => invoke<void>('log_event', { level, message }).catch(() => {}),
   updateInfo: () => invoke<UpdateInfo>('update_info'),
   mcpInfo: () => invoke<McpInfo>('mcp_info'),
+  assistantHistory: () => invoke<ChatLine[]>('assistant_history'),
+  assistantSend: (text: string) => invoke<void>('assistant_send', { text }),
+  assistantClear: () => invoke<void>('assistant_clear'),
+  takePendingAsk: () => invoke<string | null>('take_pending_ask'),
+  speechSettings: () => invoke<SpeechSettings>('speech_settings'),
+  setSpeechSettings: (baseUrl: string, model: string, language: string, apiKey: string | null) => invoke<void>('set_speech_settings', { baseUrl, model, language, apiKey }),
+  transcribe: (audio: number[], mime: string) => invoke<string>('transcribe', { audio, mime }),
   mcpSetEnabled: (enabled: boolean) => invoke<McpInfo>('mcp_set_enabled', { enabled }),
   mcpToken: () => invoke<string>('mcp_token'),
   mcpNewToken: () => invoke<McpInfo>('mcp_new_token'),

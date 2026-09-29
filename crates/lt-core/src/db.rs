@@ -138,6 +138,14 @@ const MIGRATIONS: &[&str] = &[
         SELECT v.id FROM versions v WHERE v.song_id = takes.song_id AND v.created_at <= takes.added_at ORDER BY v.id DESC LIMIT 1);
     UPDATE songs SET status = 'ready' WHERE status IN ('takes', 'done');
     "#,
+    // v7: the in-app assistant's conversation (each row is one chat message as JSON).
+    r#"
+    CREATE TABLE assistant_messages (
+        id         INTEGER PRIMARY KEY,
+        body       TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    );
+    "#,
 ];
 
 pub fn open(path: &std::path::Path) -> Result<Connection> {

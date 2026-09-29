@@ -13,7 +13,11 @@ lute-and-tavern/
 │           ├── organize.rs    the managed library folder: song folders, stems, song.json, moves and renames
 │           ├── tags.rs        reading audio files: tags, length, cover art, stems, file-name fallbacks
 │           ├── genre.rs       genre normalization (ID3 numbers, casing)
-│           └── songwriter.rs  OpenAI-compatible client: write and rewrite songs
+│           ├── songwriter.rs  OpenAI-compatible client: write and rewrite songs
+│           ├── audio.rs       WAV to FLAC for stems, verified sample by sample
+│           ├── mcp.rs         MCP songwriting tools (JSON-RPC, transport-free)
+│           ├── control.rs     MCP full-control tools: search, playlists, tags, playback
+│           └── assistant.rs   in-app assistant (tool-calling chat, history) and the Whisper voice hook
 ├── apps/
 │   └── desktop/               THE DESKTOP FACE (Tauri 2). macOS first, then Linux and Windows.
 │       ├── index.html
@@ -24,7 +28,8 @@ lute-and-tavern/
 │       │   ├── visualizer.ts  background visualizer (three.js)
 │       │   ├── music/         notation drawing and MusicXML
 │       │   └── ui/            library grid and sidebar, song popup, sheet editor, settings
-│       └── src-tauri/         Rust side of the app: commands, lt:// file protocol, folder watcher
+│       └── src-tauri/         Rust side of the app: commands, lt:// file protocol, folder watcher,
+│                              local MCP server, assistant and luteandtavern:// links
 ├── scripts/
 │   ├── dev-mac.sh             runs one live development copy on the Mac
 │   └── build-mac.sh           builds and signs the macOS app (run on the Mac)

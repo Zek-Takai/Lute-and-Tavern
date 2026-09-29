@@ -1,5 +1,6 @@
 //! Lute & Tavern desktop app: Tauri commands over lt-core, the `lt://` file protocol and the music-folder watcher.
 
+mod assistant;
 mod log;
 mod mcp;
 mod musickit;
@@ -343,6 +344,11 @@ fn main_window(app: &tauri::App) -> tauri::Result<()> {
         .title("Lute & Tavern")
         .inner_size(1320.0, 860.0)
         .min_inner_size(900.0, 600.0)
+        // The assistant's voice button records from the microphone (the system still asks the person once).
+        .on_permission_request(|_, kind| match kind {
+            tauri::webview::PermissionKind::Microphone => tauri::webview::PermissionResponse::Allow,
+            _ => tauri::webview::PermissionResponse::Default,
+        })
         .on_new_window(move |url, features| {
             let apple = url.host_str().is_some_and(|h| h == "apple.com" || h.ends_with(".apple.com"));
             if !apple {
@@ -381,15 +387,37 @@ async fn save_external_song(state: State<'_, AppState>, song: lt_core::library::
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // A second launch (e.g. from a luteandtavern:// link on Windows or Linux) hands its link to this one.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _| {
+            for a in argv.iter().filter(|a| a.starts_with("luteandtavern://")) {
+                assistant::handle_link(app, a);
+            }
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_localhost::Builder::new(LOCALHOST_PORT).build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updates::Pending::default())
         .manage(musickit::TokenCache::default())
         .manage(mcp::Running::default())
+        .manage(assistant::PendingAsk::default())
         .register_asynchronous_uri_scheme_protocol("lt", protocol::handle)
         .setup(|app| {
             main_window(app)?;
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    for u in event.urls() {
+                        assistant::handle_link(&handle, u.as_str());
+                    }
+                });
+                if let Ok(Some(urls)) = app.deep_link().get_current() {
+                    for u in urls {
+                        assistant::handle_link(app.handle(), u.as_str());
+                    }
+                }
+            }
             let dir = app.path().app_data_dir()?;
             log::init(&dir);
             let lib = Arc::new(Library::open(&dir)?);
@@ -470,6 +498,13 @@ pub fn run() {
             updates::check_update,
             updates::install_update,
             mcp::mcp_info,
+            assistant::assistant_history,
+            assistant::assistant_clear,
+            assistant::assistant_send,
+            assistant::speech_settings,
+            assistant::set_speech_settings,
+            assistant::transcribe,
+            assistant::take_pending_ask,
             mcp::mcp_set_enabled,
             mcp::mcp_token,
             mcp::mcp_new_token,

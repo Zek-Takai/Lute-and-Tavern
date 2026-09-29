@@ -17,6 +17,7 @@
     <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
       <input id="q" type="search" placeholder="Search songs, artists, albums, lyrics" aria-label="Search music"></label>
     <button class="btn" id="addMusic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 4v12M6 10l6 6 6-6M5 20h14"/></svg>Add music</button>
+    <button class="btn" id="assistBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/></svg>Assistant</button>
     <button class="btn primary" id="newSong"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>Request a song</button>
   </header>
   <div class="layout" id="layout">
@@ -115,6 +116,17 @@
   <header><div class="grow"><b>Now playing</b><span class="meta" id="qFrom"></span></div>
     <button class="close" id="qClose" aria-label="Close list"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6 6 18"/></svg></button></header>
   <ol id="qList"></ol>
+</aside>
+<aside class="assist glass" id="assist" hidden aria-label="Assistant">
+  <header><div class="grow"><b id="aName">Assistant</b><span class="meta" id="aKeys"></span></div>
+    <button class="btn small" id="aClear" title="Start a new conversation">New chat</button>
+    <button class="close" id="aClose" aria-label="Close assistant"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6 6 18"/></svg></button></header>
+  <div class="a-log" id="aLog" aria-live="polite"></div>
+  <form class="a-compose" id="aForm">
+    <textarea id="aText" rows="2" placeholder="Ask for music, a playlist, a song…"></textarea>
+    <button type="button" class="play tog" id="aMic" aria-pressed="false" aria-label="Talk" title="Talk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+    <button class="btn primary">Send</button>
+  </form>
 </aside>
 <div class="toast" id="toast" role="status"></div>
 <script type="module" src="/src/main.ts"></script>

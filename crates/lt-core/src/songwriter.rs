@@ -212,34 +212,39 @@ fn client() -> Result<reqwest::blocking::Client> {
 }
 
 fn chat(cfg: &WriterConfig, messages: Vec<Value>) -> Result<String> {
+    let msg = chat_message(cfg, json!({"messages": messages, "temperature": 0.8}))?;
+    msg["content"]
+        .as_str()
+        .map(String::from)
+        .ok_or_else(|| anyhow!("The songwriter's answer was empty"))
+}
+
+/// One chat completion; `body` holds messages and any extras (tools, temperature). Returns the reply message.
+pub fn chat_message(cfg: &WriterConfig, mut body: Value) -> Result<Value> {
     if !cfg.is_ready() {
         bail!("Set up the songwriter in Settings first: an address and a model");
     }
     let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
-    let mut req = client()?
-        .post(&url)
-        .json(&json!({"model": cfg.model, "messages": messages, "temperature": 0.8}));
+    body["model"] = json!(cfg.model);
+    let mut req = client()?.post(&url).json(&body);
     if let Some(k) = cfg.api_key.as_deref().filter(|k| !k.is_empty()) {
         req = req.bearer_auth(k);
     }
     let res = req
         .send()
-        .with_context(|| format!("Could not reach the songwriter at {url}"))?;
+        .with_context(|| format!("Could not reach the AI at {url}"))?;
     let status = res.status();
     let body: Value = res
         .json()
-        .context("The songwriter sent back something that is not JSON")?;
+        .context("The AI sent back something that is not JSON")?;
     if !status.is_success() {
         let msg = body["error"]["message"]
             .as_str()
             .or(body["message"].as_str())
             .unwrap_or("no details");
-        bail!("The songwriter's server answered {status}: {msg}");
+        bail!("The AI's server answered {status}: {msg}");
     }
-    body["choices"][0]["message"]["content"]
-        .as_str()
-        .map(String::from)
-        .ok_or_else(|| anyhow!("The songwriter's answer was empty"))
+    Ok(body["choices"][0]["message"].clone())
 }
 
 fn parse_written(text: &str) -> Result<Written> {

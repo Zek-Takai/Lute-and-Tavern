@@ -37,6 +37,19 @@ pub struct Handled {
     pub effects: Effects,
 }
 
+/// The tools this connection may use: songwriting, plus full control when the person allowed it.
+pub fn tool_list(cx: &Context) -> Value {
+    let mut list = tools();
+    if cx.full {
+        if let (Some(a), Value::Array(b)) = (list.as_array_mut(), crate::control::tools()) {
+            // the full get_song replaces the songwriting one
+            a.retain(|t| t["name"] != "get_song");
+            a.extend(b);
+        }
+    }
+    list
+}
+
 pub fn handle(cx: &Context, msg: &Value) -> Handled {
     let method = msg["method"].as_str().unwrap_or("");
     let Some(id) = msg.get("id").cloned() else {
@@ -64,17 +77,7 @@ pub fn handle(cx: &Context, msg: &Value) -> Handled {
             }))
         }
         "ping" => Ok(json!({})),
-        "tools/list" => {
-            let mut list = tools();
-            if cx.full {
-                if let (Some(a), Value::Array(b)) = (list.as_array_mut(), crate::control::tools()) {
-                    // the full get_song replaces the songwriting one
-                    a.retain(|t| t["name"] != "get_song");
-                    a.extend(b);
-                }
-            }
-            Ok(json!({"tools": list}))
-        }
+        "tools/list" => Ok(json!({"tools": tool_list(cx)})),
         "tools/call" => {
             let name = params["name"].as_str().unwrap_or("");
             let args = params.get("arguments").cloned().unwrap_or(json!({}));

@@ -119,3 +119,20 @@ nav.rail { position: sticky; top: 16px; display: flex; flex-direction: column; a
 .ctx button{all:unset;cursor:default;padding:7px 12px;border-radius:7px;font-size:14px}
 .ctx button:hover,.ctx button:focus-visible{background:var(--line)}
 .version-takes{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+
+/* assistant */
+.assist{position:fixed;right:16px;top:16px;bottom:calc(88px + env(safe-area-inset-bottom,0px));width:min(420px,calc(100vw - 32px));z-index:7;border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:hidden}
+.assist header{display:flex;align-items:center;gap:8px;padding:12px 10px 12px 16px;border-bottom:1px solid var(--line)}
+.assist header .grow{flex:1;min-width:0}
+.assist header b{display:block;font:700 17px/1.2 var(--display)}
+.a-log{flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
+.a-log .m{max-width:88%;padding:8px 12px;border-radius:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+.a-log .m.user{align-self:flex-end;background:var(--surface);border:1px solid var(--line)}
+.a-log .m.assistant{align-self:flex-start}
+.a-log .m.action{align-self:flex-start;font-size:12.5px;color:var(--ink-2);padding:2px 12px}
+.a-log .m.action::before{content:"↳ "}
+.a-log .m.err{color:#e88}
+.a-compose{display:flex;gap:8px;align-items:flex-end;padding:10px;border-top:1px solid var(--line)}
+.a-compose textarea{flex:1;resize:none;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--surface);color:inherit;font:inherit}
+#aMic[aria-pressed="true"]{color:#e66;outline:2px solid #e66}
+.keycap{display:inline-block;min-width:140px;text-align:center}

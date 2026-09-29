@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-assistant-send"
+description = "Enables the assistant_send command without any pre-configured scope."
+commands.allow = ["assistant_send"]
+
+[[permission]]
+identifier = "deny-assistant-send"
+description = "Denies the assistant_send command without any pre-configured scope."
+commands.deny = ["assistant_send"]
