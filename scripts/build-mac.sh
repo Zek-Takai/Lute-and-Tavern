@@ -12,19 +12,25 @@
 set -euo pipefail
 cd "${0:A:h}/../apps/desktop"
 
-identity="${LT_SIGN_IDENTITY:-}"
-if [[ -z "$identity" ]]; then
-  ids=$(security find-identity -v -p codesigning)
-  identity=$(print -r -- "$ids" | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -1)
-  [[ -z "$identity" ]] && identity=$(print -r -- "$ids" | sed -n 's/.*"\(Apple Development: .*\)"/\1/p' | head -1)
+# Pick a certificate by its SHA-1 fingerprint: two certificates can share the same name,
+# and codesign refuses a name that matches more than one.
+ids=$(security find-identity -v -p codesigning)
+pick() { print -r -- "$ids" | sed -n "s/^ *[0-9]*) \([0-9A-F]\{40\}\) \"\($1.*\)\"/\1 \2/p" | head -1; }
+if [[ -n "${LT_SIGN_IDENTITY:-}" ]]; then
+  chosen=$(pick "$LT_SIGN_IDENTITY"); [[ -z "$chosen" ]] && chosen=$(print -r -- "$ids" | grep -i "$LT_SIGN_IDENTITY" | sed -n 's/^ *[0-9]*) \([0-9A-F]\{40\}\) "\(.*\)"/\1 \2/p' | head -1)
+else
+  chosen=$(pick "Developer ID Application:")
+  [[ -z "$chosen" ]] && chosen=$(pick "Apple Development:")
 fi
-if [[ -z "$identity" ]]; then
+if [[ -z "$chosen" ]]; then
   print "No signing certificate found in your keychain."; exit 1
 fi
-print "Signing with: $identity"
+hash=${chosen%% *}
+identity=${chosen#* }
+print "Signing with: $identity ($hash)"
 
 [[ -d node_modules ]] || npm install --no-fund --no-audit
-APPLE_SIGNING_IDENTITY="$identity" npm run tauri build -- --bundles app,dmg
+APPLE_SIGNING_IDENTITY="$hash" npm run tauri build -- --bundles app,dmg
 
 app="../../target/release/bundle/macos/Lute & Tavern.app"
 codesign --verify --deep --strict "$app"
