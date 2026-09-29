@@ -15,26 +15,35 @@ pub struct Context<'a> {
     pub writer_name: String,
     /// Whether this library uses Suno's "Exclude styles" box
     pub exclude: bool,
+    /// The person allowed full control (search, playlists, editing, playback), not only songwriting
+    pub full: bool,
     pub version: &'a str,
+}
+
+/// What a tool call changed, so the app can refresh or act.
+#[derive(Default)]
+pub struct Effects {
+    /// A song that was created or changed
+    pub song: Option<i64>,
+    /// Songs, playlists or tags changed
+    pub library: bool,
+    /// Something for the interface to do (play, queue, pause...)
+    pub ui: Option<Value>,
 }
 
 pub struct Handled {
     /// None for notifications, which get no answer
     pub reply: Option<Value>,
-    /// The song a tool created or changed, so the app can refresh
-    pub changed: Option<i64>,
+    pub effects: Effects,
 }
 
 pub fn handle(cx: &Context, msg: &Value) -> Handled {
     let method = msg["method"].as_str().unwrap_or("");
     let Some(id) = msg.get("id").cloned() else {
-        return Handled {
-            reply: None,
-            changed: None,
-        }; // notification (e.g. notifications/initialized)
+        return Handled { reply: None, effects: Effects::default() }; // notification (e.g. notifications/initialized)
     };
     let params = &msg["params"];
-    let mut changed = None;
+    let mut effects = Effects::default();
     let result: std::result::Result<Value, (i64, String)> = match method {
         "initialize" => {
             let asked = params["protocolVersion"].as_str().unwrap_or("");
@@ -47,17 +56,36 @@ pub fn handle(cx: &Context, msg: &Value) -> Handled {
                 "protocolVersion": v,
                 "capabilities": {"tools": {}, "prompts": {}},
                 "serverInfo": {"name": "lute-and-tavern", "title": "Lute & Tavern", "version": cx.version},
-                "instructions": "Songwriting tools for Suno. Read suno_songwriting_guide before writing, then save songs with create_song.",
+                "instructions": if cx.full {
+                    "Lute & Tavern music app. You can search the person's library, edit song details and genre tags, build and change playlists, and play music. Start with library_overview. For songwriting, read suno_songwriting_guide, then save songs with create_song. Ask before deleting anything."
+                } else {
+                    "Songwriting tools for Suno. Read suno_songwriting_guide before writing, then save songs with create_song."
+                },
             }))
         }
         "ping" => Ok(json!({})),
-        "tools/list" => Ok(json!({"tools": tools()})),
+        "tools/list" => {
+            let mut list = tools();
+            if cx.full {
+                if let (Some(a), Value::Array(b)) = (list.as_array_mut(), crate::control::tools()) {
+                    // the full get_song replaces the songwriting one
+                    a.retain(|t| t["name"] != "get_song");
+                    a.extend(b);
+                }
+            }
+            Ok(json!({"tools": list}))
+        }
         "tools/call" => {
             let name = params["name"].as_str().unwrap_or("");
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
-            Ok(match call(cx, name, &args) {
-                Ok((v, id)) => {
-                    changed = id;
+            let result = if cx.full && crate::control::handles(name) {
+                crate::control::call(cx, name, &args)
+            } else {
+                call(cx, name, &args).map(|(v, id)| (v, Effects { song: id, library: id.is_some(), ..Default::default() }))
+            };
+            Ok(match result {
+                Ok((v, fx)) => {
+                    effects = fx;
                     let text = if let Value::String(s) = &v {
                         s.clone()
                     } else {
@@ -102,10 +130,7 @@ pub fn handle(cx: &Context, msg: &Value) -> Handled {
             json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
         }
     };
-    Handled {
-        reply: Some(reply),
-        changed,
-    }
+    Handled { reply: Some(reply), effects }
 }
 
 fn song_fields(require: bool) -> Value {
@@ -334,6 +359,7 @@ mod tests {
             lib: &l,
             writer_name: "Ari".into(),
             exclude: false,
+            full: false,
             version: "0",
         };
         let init = rpc(&cx, "initialize", json!({"protocolVersion": "2025-06-18"}));
@@ -389,5 +415,48 @@ mod tests {
         );
         assert_eq!(r["result"]["isError"], true);
         assert_eq!(rpc(&cx, "nope", json!({}))["error"]["code"], -32601);
+    }
+
+    #[test]
+    fn full_control_searches_builds_playlists_and_plays() {
+        let (_d, l) = lib();
+        let mut cx = Context { lib: &l, writer_name: "Ari".into(), exclude: false, full: false, version: "0" };
+        let names = |cx: &Context| -> Vec<String> {
+            rpc(cx, "tools/list", json!({}))["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect()
+        };
+        assert!(!names(&cx).contains(&"play".to_string()), "full control is off by default");
+        let r = rpc(&cx, "tools/call", json!({"name": "search_songs", "arguments": {}}));
+        assert_eq!(r["result"]["isError"], true);
+
+        cx.full = true;
+        assert!(names(&cx).iter().filter(|n| *n == "get_song").count() == 1);
+        for (t, g) in [("Sea Song", "folk"), ("Road Song", "rock")] {
+            let args = json!({"title": t, "style": "x", "lyrics": "[Verse]\nla", "genre": g, "hook": [{"note": "C4", "len": "w", "lyric": "la"}]});
+            rpc(&cx, "tools/call", json!({"name": "create_song", "arguments": args}));
+        }
+        let call = |name: &str, args: Value| {
+            let h = handle(&cx, &json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}}));
+            let r = h.reply.unwrap()["result"].clone();
+            assert_eq!(r["isError"], false, "{name}: {r}");
+            (r["structuredContent"].clone(), h.effects)
+        };
+        let (found, _) = call("search_songs", json!({"query": "song", "genre": "Folk"}));
+        assert_eq!(found["total"], 1);
+        let sea = found["songs"][0]["id"].as_i64().unwrap();
+        let (all, _) = call("search_songs", json!({"source": "written"}));
+        let ids: Vec<i64> = all["songs"].as_array().unwrap().iter().map(|s| s["id"].as_i64().unwrap()).collect();
+        let (p, fx) = call("create_playlist", json!({"name": "Mix", "song_ids": ids}));
+        assert!(fx.library);
+        let pid = p["id"].as_i64().unwrap();
+        call("remove_from_playlist", json!({"playlist_id": pid, "song_ids": [sea]}));
+        assert_eq!(l.playlists().unwrap()[0].songs.len(), 1);
+        let (_, fx) = call("play", json!({"playlist_id": pid, "shuffle": true}));
+        assert_eq!(fx.ui.unwrap()["action"], "play");
+        call("update_song", json!({"id": sea, "genre": "Sea Shanty"}));
+        assert_eq!(l.song(sea).unwrap().genre, "Sea Shanty");
+        call("rename_genre_tag", json!({"name": "sea shanty", "new_name": "Shanty"}));
+        assert_eq!(l.song(sea).unwrap().genre, "Shanty");
+        let (ov, _) = call("library_overview", json!({}));
+        assert_eq!(ov["songs"], 2);
     }
 }

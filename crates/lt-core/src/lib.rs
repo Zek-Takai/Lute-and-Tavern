@@ -2,6 +2,7 @@
 //! The desktop app (apps/desktop) is a thin face over this crate.
 
 pub mod audio;
+pub mod control;
 pub mod db;
 pub mod genre;
 pub mod library;

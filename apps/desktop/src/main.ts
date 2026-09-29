@@ -12,7 +12,7 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { open as pickFiles } from '@tauri-apps/plugin-dialog';
 import { api, errText } from './api';
-import { cycleRepeat, initPlayer, initQueue, refreshQueue, restoreNowPlaying, step, stop, togglePlay } from './player';
+import { aiControl, cycleRepeat, initPlayer, initQueue, refreshQueue, restoreNowPlaying, step, stop, togglePlay } from './player';
 import { onRender, reload, state, visible, writerName } from './state';
 import { initLibrary, renderChips, renderGrid, renderHead, renderSide } from './ui/library';
 import { addMusicFolder, addSongsToLibrary, checkForUpdatesAtStart, chooseLibrary, openSettings } from './ui/settings';
@@ -130,6 +130,7 @@ async function initEvents() {
     const s = state.songs.find((x) => x.id === e.payload);
     if (s && !(cur && cur.id === s.id && $<HTMLDialogElement>('#dlg').open)) toast(`${writerName()} finished "${s.title}"`);
   });
+  await listen<Parameters<typeof aiControl>[0]>('ai-control', (e) => aiControl(e.payload));
   await listen<{ id: number; message: string }>('song-failed', async (e) => {
     await reload();
     renderAll();

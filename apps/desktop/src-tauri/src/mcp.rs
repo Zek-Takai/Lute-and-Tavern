@@ -119,10 +119,17 @@ fn serve(app: &AppHandle, token: &str, mut req: Request) {
     };
     let state = app.state::<AppState>();
     let cfg = writer::config(&state);
-    let cx = lt_core::mcp::Context { lib: &state.lib, writer_name: cfg.name, exclude: cfg.exclude, version: env!("CARGO_PKG_VERSION") };
+    let full = state.lib.setting_bool("mcpFullControl");
+    let cx = lt_core::mcp::Context { lib: &state.lib, writer_name: cfg.name, exclude: cfg.exclude, full, version: env!("CARGO_PKG_VERSION") };
     let out = lt_core::mcp::handle(&cx, &msg);
-    if let Some(id) = out.changed {
+    let fx = &out.effects;
+    if let Some(id) = fx.song {
         let _ = app.emit("song-updated", id);
+    } else if fx.library {
+        crate::emit_library_changed(app);
+    }
+    if let Some(ui) = &fx.ui {
+        let _ = app.emit("ai-control", ui.clone());
     }
     match out.reply {
         Some(r) => respond(req, 200, r.to_string()),

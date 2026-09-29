@@ -160,10 +160,11 @@ function render() {
 
     <section class="set-sec">
       <h3>AI apps (MCP)</h3>
-      <p class="muted small">Lets AI apps on this computer that support MCP (Claude, Hermes and others) write Suno songs straight into your library. They get a Suno songwriting guide and tools to list, create and revise written songs, nothing else. Only works while Lute &amp; Tavern is open.</p>
+      <p class="muted small">Lets AI apps on this computer that support MCP (Claude, Hermes and others) write Suno songs straight into your library. They get a Suno songwriting guide and tools to list, create and revise written songs; turn on Full control to let them run the rest of the app too. Only works while Lute &amp; Tavern is open.</p>
       <label class="row"><input type="checkbox" id="mcpOn" ${mcp.enabled ? 'checked' : ''}> Let AI apps write songs here</label>
       ${mcp.error ? `<p class="small" style="color:var(--danger, #c44)">${esc(mcp.error)}</p>` : ''}
-      ${mcp.enabled ? `<div class="form"><label>Address</label><input readonly value="${esc(mcp.url)}"></div>
+      ${mcp.enabled ? `<label class="row small"><input type="checkbox" id="mcpFull" ${state.settings.mcpFullControl ? 'checked' : ''}> Full control: they can also search your library, play music, make and change playlists, edit song details and genre tags</label>
+      <div class="form"><label>Address</label><input readonly value="${esc(mcp.url)}"></div>
       <div class="row"><button class="btn small" id="mcpCopyUrl">Copy address</button><button class="btn small" id="mcpCopyToken">Copy token</button><button class="btn small" id="mcpCopyCfg">Copy setup for your AI app</button><button class="btn small" id="mcpNew">New token</button></div>
       <p class="muted small">The token is kept in your system keychain. Give it only to apps you trust; New token cuts off every app using the old one.</p>` : ''}
     </section>
@@ -351,6 +352,7 @@ function render() {
     await reload();
     render();
   };
+  document.getElementById('mcpFull')?.addEventListener('change', (e) => void saveSetting('mcpFullControl', (e.target as HTMLInputElement).checked));
   document.getElementById('mcpCopyUrl')?.addEventListener('click', () => copyText(mcp.url, 'Address'));
   document.getElementById('mcpCopyToken')?.addEventListener('click', async () => copyText(await api.mcpToken(), 'Token'));
   document.getElementById('mcpCopyCfg')?.addEventListener('click', async () => {

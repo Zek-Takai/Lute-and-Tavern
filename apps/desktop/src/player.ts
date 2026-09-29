@@ -153,7 +153,7 @@ export function saveNowPlaying(force = true) {
   const now = Date.now();
   if (!force && now - lastSaved < 10000) return;
   lastSaved = now;
-  void saveSetting('nowPlaying', { songId: nowSong.id, queue: queue.map((s) => s.id), qi, from: queueFrom, pos: Math.round(position().cur * 10) / 10 });
+  void saveSetting('nowPlaying', { songId: nowSong.id, queue: queue.map((s) => s.id), qi, from: queueFrom, pos: Math.round(position().cur * 10) / 10, paused: !playing || paused });
 }
 
 /** On launch: shows the last song paused at its place; Play continues from there. */
@@ -400,6 +400,40 @@ export function step(dir: 1 | -1) {
   qi = n;
   stop();
   playSong(queue[qi]);
+}
+
+/** Adds songs to the queue, right after the current song or at the end. Nothing starts playing by itself. */
+export function enqueue(songs: Song[], next: boolean) {
+  const add = songs.filter(playable);
+  if (next) queue.splice(qi + 1, 0, ...add);
+  else queue.push(...add);
+  renderQueue();
+  saveNowPlaying();
+}
+
+/** Carries out a request from a connected AI app (Settings › AI apps › Full control). */
+export function aiControl(cmd: { action: string; songIds?: number[]; shuffle?: boolean; next?: boolean }) {
+  const songs = (cmd.songIds ?? []).map((id) => byId(id)).filter((s): s is Song => !!s && playable(s));
+  switch (cmd.action) {
+    case 'play': {
+      if (cmd.shuffle) for (let i = songs.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [songs[i], songs[j]] = [songs[j], songs[i]]; }
+      if (!songs.length) return;
+      stop();
+      playSong(songs[0], songs);
+      queueFrom = 'Picked by your AI';
+      renderQueue();
+      return;
+    }
+    case 'queue': return enqueue(songs, !!cmd.next);
+    case 'pause': if (playing && !paused) togglePause(); return;
+    case 'resume':
+      if (playing && paused) togglePause();
+      else if (!playing) togglePlay([]);
+      return;
+    case 'next': return step(1);
+    case 'previous': return step(-1);
+    case 'stop': return stop();
+  }
 }
 
 export function togglePlay(fallback: Song[]) {
