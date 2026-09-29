@@ -12,7 +12,10 @@
 
 ## Next
 - Linux and Windows builds (on Windows, reordering the queue by dragging needs a different drag mode)
-- Transcription from audio: split stems, turn the vocal into a melody, detect chords, sync lyrics
+- Sheet music from audio (optional tool, low priority: sheet music is for people who read it; the app's owner does not).
+  Plan when it is built: use the song's Suno vocal stem when present, else split locally with Spleeter (MIT);
+  vocal to notes with RMVPE (Apache-2.0), tempo with Beat This! (MIT); lyrics placed from the known words.
+  Not Demucs: its weights are licensed for scientific use only. Fine-tune only if stock accuracy on real songs is poor.
 - Local music generation: render a songwriter song to audio on your own machine (open models such as ACE-Step), landing as a take
 - Lyrics view with timing while a song plays
 - In-app updates (Tauri updater): deferred until the app has users. People on versions without it update by downloading the new release
