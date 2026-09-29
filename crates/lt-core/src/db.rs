@@ -131,6 +131,13 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE songs ADD COLUMN art_url TEXT;
     CREATE UNIQUE INDEX songs_provider_id ON songs(provider, provider_id) WHERE provider_id IS NOT NULL;
     "#,
+    // v6: takes belong to the lyrics version they were made from; songs no longer get "finished".
+    r#"
+    ALTER TABLE takes ADD COLUMN version_id INTEGER REFERENCES versions(id) ON DELETE SET NULL;
+    UPDATE takes SET version_id = (
+        SELECT v.id FROM versions v WHERE v.song_id = takes.song_id AND v.created_at <= takes.added_at ORDER BY v.id DESC LIMIT 1);
+    UPDATE songs SET status = 'ready' WHERE status IN ('takes', 'done');
+    "#,
 ];
 
 pub fn open(path: &std::path::Path) -> Result<Connection> {

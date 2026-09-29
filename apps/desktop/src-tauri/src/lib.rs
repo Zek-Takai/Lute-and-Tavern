@@ -279,6 +279,11 @@ async fn export_text(path: String, contents: String) -> Res<()> {
     std::fs::write(&path, contents).map_err(|e| format!("Could not save {path}: {e}"))
 }
 
+#[tauri::command]
+async fn delete_take(state: State<'_, AppState>, take: i64) -> Res<()> {
+    blocking(&state, move |l| l.delete_take(take)).await
+}
+
 /// Attaches stem files, or whole folders of them, to a song.
 #[tauri::command]
 async fn attach_stems(state: State<'_, AppState>, song: i64, paths: Vec<String>, to_flac: bool) -> Res<usize> {
@@ -451,6 +456,7 @@ pub fn run() {
             read_sheet_text,
             export_text,
             add_take,
+            delete_take,
             attach_stems,
             stems_wav_count,
             convert_stems_to_flac,

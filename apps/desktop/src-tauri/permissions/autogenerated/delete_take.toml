@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-delete-take"
+description = "Enables the delete_take command without any pre-configured scope."
+commands.allow = ["delete_take"]
+
+[[permission]]
+identifier = "deny-delete-take"
+description = "Denies the delete_take command without any pre-configured scope."
+commands.deny = ["delete_take"]

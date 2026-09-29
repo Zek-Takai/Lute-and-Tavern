@@ -31,3 +31,35 @@ export async function copyText(text: string, label: string) {
     toast('Copy did not work here. Select the text and copy it by hand.');
   }
 }
+
+/** A small right-click menu at the pointer. Closes on the next click, scroll or Escape. */
+export function contextMenu(e: MouseEvent, items: [string, () => void][]) {
+  e.preventDefault();
+  document.querySelector('.ctx')?.remove();
+  const m = document.createElement('div');
+  m.className = 'ctx';
+  m.setAttribute('role', 'menu');
+  items.forEach(([label, fn]) => {
+    const b = document.createElement('button');
+    b.setAttribute('role', 'menuitem');
+    b.textContent = label;
+    b.onclick = () => { close(); fn(); };
+    m.append(b);
+  });
+  document.body.append(m);
+  const x = Math.min(e.clientX, innerWidth - m.offsetWidth - 8), y = Math.min(e.clientY, innerHeight - m.offsetHeight - 8);
+  m.style.left = `${Math.max(8, x)}px`;
+  m.style.top = `${Math.max(8, y)}px`;
+  m.querySelector('button')?.focus();
+  const away = (ev: Event) => { if (!(ev.target instanceof Node && m.contains(ev.target))) close(); };
+  const key = (ev: KeyboardEvent) => { if (ev.key === 'Escape') close(); };
+  function close() {
+    m.remove();
+    document.removeEventListener('mousedown', away, true);
+    document.removeEventListener('keydown', key, true);
+    document.removeEventListener('scroll', close, true);
+  }
+  document.addEventListener('mousedown', away, true);
+  document.addEventListener('keydown', key, true);
+  document.addEventListener('scroll', close, true);
+}

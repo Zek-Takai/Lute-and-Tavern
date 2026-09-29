@@ -154,6 +154,8 @@ pub struct Take {
     pub name: String,
     pub origin: String,
     pub added_at: i64,
+    /// The lyrics version the take was made from
+    pub version_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -312,13 +314,14 @@ impl Library {
         let song = self.song(id)?;
         let db = self.db();
         let takes = db
-            .prepare("SELECT id, name, origin, added_at FROM takes WHERE song_id = ?1 ORDER BY id")?
+            .prepare("SELECT id, name, origin, added_at, version_id FROM takes WHERE song_id = ?1 ORDER BY id")?
             .query_map([id], |r| {
                 Ok(Take {
                     id: r.get(0)?,
                     name: r.get(1)?,
                     origin: r.get(2)?,
                     added_at: r.get(3)?,
+                    version_id: r.get(4)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1233,22 +1236,49 @@ impl Library {
         std::fs::copy(src, &dest).with_context(|| format!("copying {}", src.display()))?;
         let t = now();
         let db = self.db();
+        let version_id: Option<i64> = db
+            .query_row("SELECT id FROM versions WHERE song_id = ?1 ORDER BY id DESC LIMIT 1", [song], |r| r.get(0))
+            .optional()?;
         db.execute(
-            "INSERT INTO takes(song_id, name, path, origin, added_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![song, name, dest.to_string_lossy(), origin, t],
+            "INSERT INTO takes(song_id, name, path, origin, added_at, version_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![song, name, dest.to_string_lossy(), origin, t, version_id],
         )?;
         let id = db.last_insert_rowid();
         db.execute(
-            "UPDATE songs SET master_take = COALESCE(master_take, ?2), \
-             status = CASE WHEN status IN ('writing','ready') THEN 'takes' ELSE status END, updated_at = ?3 WHERE id = ?1",
+            "UPDATE songs SET master_take = COALESCE(master_take, ?2), updated_at = ?3 WHERE id = ?1",
             params![song, id, t],
         )?;
+        drop(db);
+        self.write_sidecar(song)?;
         Ok(Take {
             id,
             name,
             origin: origin.into(),
             added_at: t,
+            version_id,
         })
+    }
+
+    /// Deletes a take and its file. When it was the master, the newest remaining take becomes the master.
+    pub fn delete_take(&self, take: i64) -> Result<()> {
+        let (song, path, master): (i64, String, Option<i64>) = self.db().query_row(
+            "SELECT t.song_id, t.path, s.master_take FROM takes t JOIN songs s ON s.id = t.song_id WHERE t.id = ?1",
+            [take],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
+        {
+            let db = self.db();
+            db.execute("DELETE FROM takes WHERE id = ?1", [take])?;
+            if master == Some(take) {
+                db.execute(
+                    "UPDATE songs SET master_take = (SELECT id FROM takes WHERE song_id = ?1 ORDER BY id DESC LIMIT 1) WHERE id = ?1",
+                    [song],
+                )?;
+            }
+            db.execute("UPDATE songs SET updated_at = ?2 WHERE id = ?1", params![song, now()])?;
+        }
+        let _ = std::fs::remove_file(&path);
+        self.write_sidecar(song)
     }
 
     /// Attaches stem files to a song; a folder brings every audio file inside it. Files already in the
@@ -1517,7 +1547,7 @@ impl Library {
     }
 
     pub fn set_status(&self, song: i64, status: &str) -> Result<()> {
-        if !["writing", "ready", "takes", "done"].contains(&status) {
+        if !["writing", "ready"].contains(&status) {
             bail!("unknown status {status}");
         }
         self.db().execute(
@@ -2042,6 +2072,24 @@ mod tests {
             "the library copy's song is gone"
         );
         assert!(!copy.exists() && outside.join("Porch Light (Bass).mp3").exists());
+    }
+
+    #[test]
+    fn takes_join_their_version_and_can_be_deleted() {
+        let (d, l) = lib();
+        let s = l.create_request("a song", None, "Bard").unwrap();
+        l.apply_draft(s.id, &Draft { title: "Porch Light".into(), lyrics: "x".into(), ..Default::default() }, "v", false).unwrap();
+        let v1 = l.song_detail(s.id).unwrap().versions[0].id;
+        let f = d.path().join("take.mp3");
+        std::fs::write(&f, b"x").unwrap();
+        let a = l.add_take(s.id, &f, "from Suno").unwrap();
+        let b = l.add_take(s.id, &f, "from Suno").unwrap();
+        assert_eq!((a.version_id, l.song(s.id).unwrap().status.as_deref()), (Some(v1), Some("ready")), "no take stage");
+        assert_eq!(l.song(s.id).unwrap().master_take, Some(a.id));
+        l.delete_take(a.id).unwrap();
+        assert_eq!(l.song(s.id).unwrap().master_take, Some(b.id), "the newest remaining take becomes master");
+        l.delete_take(b.id).unwrap();
+        assert_eq!(l.song(s.id).unwrap().master_take, None);
     }
 
     #[test]

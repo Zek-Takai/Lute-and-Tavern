@@ -1,14 +1,53 @@
 // The song popup: Song (Suno fields), Talk to the songwriter, Sheet music, Takes, Details, Versions.
-import { open as pickFile } from '@tauri-apps/plugin-dialog';
+import { ask, open as pickFile } from '@tauri-apps/plugin-dialog';
 import { api, errText, lt, type SongDetail } from '../api';
 import { keyName } from '../music/notation';
 import { pickStems, playing, playSong, playStems, playTake, setStemMix, stemMix, stop, syncIcons } from '../player';
 import { byId, playable, reload, rerender, saveSetting, state, visible, writerName } from '../state';
-import { $, copyText, date, esc, PLAY, toast } from '../util';
-import { sourceBadge, STATUS } from './library';
+import { $, contextMenu, copyText, date, esc, PLAY, toast } from '../util';
+import { sourceBadge, stageChip } from './library';
 import { renderSheet, resetSheet } from './sheet';
 
 const STEM_BUTTONS = `<button class="btn" data-attach="folder">Attach a stems folder…</button><button class="btn" data-attach="files">Attach stem files…</button>`;
+
+const isMaster = (s: SongDetail, id: number, i: number) => s.masterTake === id || (s.masterTake == null && i === 0);
+
+function takeRow(s: SongDetail, t: SongDetail['takes'][number], i: number) {
+  const master = isMaster(s, t.id, i);
+  return `<div class="take${master ? ' master' : ''}" data-take-row="${t.id}" tabindex="0"><button class="play" aria-label="Play take ${i + 1}" data-take="${t.id}" data-play="${s.id}:t${t.id}">${PLAY}</button>
+    <div><b>Take ${i + 1}</b> <span class="muted small">${esc(t.name)}, ${esc(t.origin)}, ${date(t.addedAt)}</span></div>
+    ${master ? '<span class="badge">Master</span>' : ''}</div>`;
+}
+
+/** Play on click; right-click (or the keyboard's menu key) for Make master and Delete take. */
+function wireTakes(b: HTMLElement, s: SongDetail) {
+  b.querySelectorAll<HTMLElement>('[data-take]').forEach((x) => (x.onclick = () => {
+    const t = s.takes.find((t) => t.id === Number(x.dataset.take))!;
+    playTake(byId(s.id) ?? s, t.id, t.name);
+  }));
+  b.querySelectorAll<HTMLElement>('[data-take-row]').forEach((row) => row.addEventListener('contextmenu', (e) => {
+    const id = Number(row.dataset.takeRow);
+    const i = s.takes.findIndex((t) => t.id === id);
+    const items: [string, () => void][] = [];
+    if (!isMaster(s, id, i)) items.push(['Make master', async () => {
+      await api.setMasterTake(s.id, id).catch((err) => toast(errText(err)));
+      await afterChange();
+      toast(`Take ${i + 1} is now the master`);
+    }]);
+    items.push(['Delete take', async () => {
+      if (!(await ask(`Delete take ${i + 1} (${s.takes[i].name})? Its audio file is removed from the song's folder.`, { title: 'Delete take', kind: 'warning', okLabel: 'Delete', cancelLabel: 'Keep' }))) return;
+      if (playing?.id === `${s.id}:t${id}`) stop();
+      try {
+        await api.deleteTake(id);
+        await afterChange();
+        toast(`Take ${i + 1} deleted`);
+      } catch (err) {
+        toast(errText(err));
+      }
+    }]);
+    contextMenu(e, items);
+  }));
+}
 
 /** Whether WAV stems should be stored as FLAC: the saved choice, or ask (with "remember"). Null when cancelled. */
 async function chooseFlac(paths: string[]): Promise<boolean | null> {
@@ -87,7 +126,8 @@ function renderHeader() {
   mp.dataset.play = String(s.id);
   mp.hidden = !playable(s);
   const m: string[] = [];
-  if (s.source === 'ai' && s.status) m.push(`<span class="status ${STATUS[s.status][1]}">${STATUS[s.status][0]}</span>`);
+  const chip = stageChip(s);
+  if (chip) m.push(chip);
   m.push(sourceBadge(s), `<span class="gtag">${esc(s.genre)}</span>`);
   if (s.source === 'ai' && s.lyrics)
     m.push(...[s.subGenre, keyName(s.key), s.bpm ? `${s.bpm} BPM` : '', `Written by ${s.artist}`].filter(Boolean).map((v) => `<span class="meta">${esc(v)}</span>`));
@@ -145,26 +185,11 @@ export function renderTab() {
   if (tab === 'takes') {
     b.innerHTML =
       (s.takes.length
-        ? s.takes
-            .map((t, i) => {
-              const master = s.masterTake === t.id || (s.masterTake == null && i === 0);
-              return `<div class="take${master ? ' master' : ''}"><button class="play" aria-label="Play take" data-take="${t.id}" data-play="${s.id}:t${t.id}">${PLAY}</button>
-            <div><b>Take ${i + 1}</b> <span class="muted small">${esc(t.name)}, ${esc(t.origin)}, ${date(t.addedAt)}</span></div>
-            ${master ? '<span class="badge">Master</span>' : `<button class="btn small" data-master="${t.id}">Make master</button>`}</div>`;
-            })
-            .join('')
+        ? s.takes.map((t, i) => takeRow(s, t, i)).join('')
         : `<p class="muted" style="margin-top:0">No takes yet. Generate the song in Suno with the fields on the Song tab, then add the audio file here.</p>`) +
-      `<div class="row"><button class="btn" id="addTake">Add a take</button>${STEM_BUTTONS}${s.status !== 'done' && s.takes.length ? '<button class="btn" id="markDone">Mark song finished</button>' : ''}</div>
-      <p class="small muted">The master take is what plays in your library. Turning a take into sheet music automatically is planned for a later version.</p>`;
-    b.querySelectorAll<HTMLElement>('[data-take]').forEach((x) => (x.onclick = () => {
-      const t = s.takes.find((t) => t.id === Number(x.dataset.take))!;
-      playTake(byId(s.id) ?? s, t.id, t.name);
-    }));
-    b.querySelectorAll<HTMLElement>('[data-master]').forEach((x) => (x.onclick = async () => {
-      await api.setMasterTake(s.id, Number(x.dataset.master)).catch((e) => toast(errText(e)));
-      await afterChange();
-      toast('Master take set');
-    }));
+      `<div class="row"><button class="btn" id="addTake">Add a take</button>${STEM_BUTTONS}</div>
+      <p class="small muted">The master take is what plays in your library. Right-click a take to make it the master or delete it. Each take is kept with the lyrics version it was made from (see Versions).</p>`;
+    wireTakes(b, s);
     wireAttachStems(b, s, afterChange);
     $('#addTake').onclick = async () => {
       const path = await pickFile({ multiple: false, filters: [{ name: 'Audio', extensions: ['mp3', 'wav', 'flac', 'm4a', 'ogg', 'aac', 'opus', 'aiff'] }] });
@@ -177,8 +202,6 @@ export function renderTab() {
         toast(errText(e));
       }
     };
-    const done = b.querySelector<HTMLElement>('#markDone');
-    if (done) done.onclick = async () => { await api.setStatus(s.id, 'done'); await afterChange(); toast('Marked finished'); };
   }
   if (tab === 'details') {
     const fields: [keyof SongDetail, string][] = [['title', 'Title'], ['artist', 'Artist'], ['album', 'Album'], ['year', 'Year'], ['genre', 'Genre']];
@@ -283,9 +306,14 @@ export function renderTab() {
     });
   }
   if (tab === 'versions') {
+    const takesOf = (vid: number | null) => s.takes.map((t, i) => [t, i] as const).filter(([t]) => t.versionId === vid);
+    const block = (list: ReturnType<typeof takesOf>) => (list.length ? `<div class="version-takes">${list.map(([t, i]) => takeRow(s, t, i)).join('')}</div>` : '');
+    const loose = takesOf(null);
     b.innerHTML = s.versions.length
-      ? `<ol class="versions">${s.versions.map((v) => `<li><b>${esc(v.label)}</b><span class="muted small">${date(v.createdAt)}</span><div>${esc(v.note)}</div></li>`).join('')}</ol>`
-      : `<p class="muted" style="margin-top:0">No versions yet. The first draft becomes v1.</p>`;
+      ? `<ol class="versions">${s.versions.map((v) => `<li><b>${esc(v.label)}</b><span class="muted small">${date(v.createdAt)}</span><div>${esc(v.note)}</div>${block(takesOf(v.id))}</li>`).join('')}</ol>` +
+        (loose.length ? `<h4 class="sub">Takes from before versions were tracked</h4>${block(loose)}` : '')
+      : `<p class="muted" style="margin-top:0">No versions yet. The first draft becomes v1.</p>${block(loose)}`;
+    wireTakes(b, s);
   }
 }
 

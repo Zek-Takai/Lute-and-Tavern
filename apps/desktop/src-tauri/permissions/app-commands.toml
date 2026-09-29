@@ -30,6 +30,7 @@ commands.allow = [
   "read_sheet_text",
   "export_text",
   "add_take",
+  "delete_take",
   "attach_stems",
   "stems_wav_count",
   "convert_stems_to_flac",

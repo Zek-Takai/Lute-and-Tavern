@@ -2,17 +2,21 @@
 import { api, errText, lt, type Song } from '../api';
 import { playSong, syncIcons } from '../player';
 import { keyName, staffSVG, toMeasures } from '../music/notation';
-import { albums, genresInUse, inMainLibrary, playable, rerender, reload, saveSetting, state, viewName, visible, writerName, type SideTab } from '../state';
+import { albums, genresInUse, inMainLibrary, playable, rerender, reload, saveSetting, stage, state, viewName, visible, writerName, type SideTab } from '../state';
 import { $, esc, hueOf, PLAY, toast } from '../util';
 import { artUrl } from '../apple';
 import { appleHead, applePanel, handleApplePanelClick, renderAppleGrid } from './apple';
 import { openSong } from './song';
 
+/** Stages of a written song, for filters; songs with audio are just songs, so only the first two get a label on cards. */
 export const STATUS: Record<string, [string, string]> = {
   writing: ['Writing', 's-draft'],
   ready: ['Ready for Suno', 's-ready'],
-  takes: ['Picking a take', 's-takes'],
-  done: ['Finished', 's-done'],
+  audio: ['With audio', 's-done'],
+};
+export const stageChip = (s: Song) => {
+  const k = s.source === 'ai' ? stage(s) : null;
+  return k && k !== 'audio' ? `<span class="status ${STATUS[k][1]}">${STATUS[k][0]}</span>` : '';
 };
 
 const nav = (attr: string, val: string | number, label: string, count: number, on: boolean) =>
@@ -114,7 +118,7 @@ export function renderChips() {
   if (chips.hidden) return;
   const pool = state.songs.filter((s) => s.source === 'ai');
   const counts: Record<string, number> = { all: pool.length };
-  pool.forEach((s) => (counts[s.status ?? ''] = (counts[s.status ?? ''] || 0) + 1));
+  pool.forEach((s) => (counts[stage(s)] = (counts[stage(s)] || 0) + 1));
   const opts = [['all', 'All'], ...Object.entries(STATUS).map(([k, [l]]) => [k, l])];
   chips.innerHTML = opts.map(([k, l]) => `<button class="chip" aria-pressed="${state.filter === k}" data-f="${k}">${l}<span class="n">${counts[k] || 0}</span></button>`).join('');
 }
@@ -149,7 +153,6 @@ export function renderGrid() {
   $('#grid').innerHTML = list.length
     ? list
         .map((s) => {
-          const st = s.source === 'ai' && s.status ? STATUS[s.status] : null;
           const writing = s.source === 'ai' && s.status === 'writing' && !s.lyrics;
           const sub = s.source === 'ai'
             ? writing ? esc((s.request ?? '').slice(0, 70)) + ((s.request ?? '').length > 70 ? '…' : '') : [s.subGenre, keyName(s.key), s.bpm ? `${s.bpm} BPM` : ''].filter(Boolean).map(esc).join(', ')
@@ -159,7 +162,7 @@ export function renderGrid() {
         <div class="body">
           <h3>${esc(s.title)}</h3>
           <div class="meta">${sub}</div>
-          <div class="foot">${sourceBadge(s)}${st ? `<span class="status ${st[1]}">${st[0]}</span>` : ''}<span class="gtag">${esc(s.genre)}</span><span style="margin-right:auto"></span>
+          <div class="foot">${sourceBadge(s)}${stageChip(s)}<span class="gtag">${esc(s.genre)}</span><span style="margin-right:auto"></span>
             ${playable(s) ? `<button class="play" data-play="${s.id}" aria-label="Play">${PLAY}</button>` : ''}</div>
         </div></article>`;
         })

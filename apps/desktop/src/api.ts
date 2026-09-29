@@ -2,7 +2,7 @@
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 
 export type Note = { s: number; d: 'w' | 'h' | 'q' | 'e'; w: string };
-export type Status = 'writing' | 'ready' | 'takes' | 'done';
+export type Status = 'writing' | 'ready';
 
 export interface Song {
   id: number;
@@ -42,7 +42,7 @@ export interface Song {
   artUrl: string | null;
 }
 export interface McpInfo { enabled: boolean; running: boolean; url: string; error: string | null }
-export interface Take { id: number; name: string; origin: string; addedAt: number }
+export interface Take { id: number; name: string; origin: string; addedAt: number; versionId: number | null }
 export interface Version { id: number; label: string; note: string; createdAt: number }
 export interface Message { role: 'user' | 'writer'; text: string; createdAt: number }
 export interface Stem { id: number; name: string; format: string }
@@ -86,6 +86,7 @@ export const api = {
   readSheetText: (id: number) => invoke<string>('read_sheet_text', { id }),
   exportText: (path: string, contents: string) => invoke<void>('export_text', { path, contents }),
   addTake: (song: number, path: string, origin: string) => invoke<Take>('add_take', { song, path, origin }),
+  deleteTake: (take: number) => invoke<void>('delete_take', { take }),
   attachStems: (song: number, paths: string[], toFlac: boolean) => invoke<number>('attach_stems', { song, paths, toFlac }),
   stemsWavCount: (paths: string[]) => invoke<number>('stems_wav_count', { paths }),
   convertStemsToFlac: (song: number | null) => invoke<{ count: number; bytesBefore: number; bytesAfter: number }>('convert_stems_to_flac', { song }),

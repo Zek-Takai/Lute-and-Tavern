@@ -40,6 +40,9 @@ export async function saveSetting(key: string, value: unknown) {
 }
 
 export const writerName = () => state.writer.name || 'Bard';
+
+/** Where a written song stands: being written, lyrics ready for Suno, or it has audio (a take or stems). */
+export const stage = (s: Song) => (s.status === 'writing' && !s.lyrics ? 'writing' : s.hasAudio ? 'audio' : 'ready');
 export const libraryFolder = () => state.folders.find((f) => f.managed) ?? null;
 export const byId = (id: number) => state.songs.find((s) => s.id === id);
 export const gkey = (g: string) => (g || 'Unsorted').toLowerCase();
@@ -94,7 +97,7 @@ export function visible(): Song[] {
     (s) =>
       inView(s) &&
       (state.genre === 'all' || gkey(s.genre) === state.genre) &&
-      (state.view.kind !== 'ai' || state.filter === 'all' || s.status === state.filter) &&
+      (state.view.kind !== 'ai' || state.filter === 'all' || stage(s) === state.filter) &&
       (!q || [s.title, s.artist, s.album, s.genre, s.subGenre, s.lyrics, s.request ?? ''].join(' ').toLowerCase().includes(q)),
   );
   const v = state.view;
