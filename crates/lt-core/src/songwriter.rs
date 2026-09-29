@@ -39,7 +39,7 @@ const FORMAT: &str = r#"Answer with one JSON object and nothing else:
   "key": "musical key such as C, G, Am, F#m",
   "bpm": 96,
   "style": "Suno 'Style of Music' prompt: comma-separated genre, instruments, vocal type, mood; under 200 characters",
-  "exclude": "comma-separated styles Suno should avoid",
+  "exclude": "Suno 'Exclude styles' box: at most 4 short tags this style could drift into by mistake (e.g. for acoustic folk: 'drums, electric guitar, autotune'); not unrelated genres, not moods or tempos the style already sets; empty string when nothing needs excluding",
   "lyrics": "full lyrics with Suno section tags on their own lines: [Intro], [Verse 1], [Pre-Chorus], [Chorus], [Bridge], [Outro]",
   "chords": ["four to eight chord symbols for the chorus, one per 4/4 measure"],
   "hook": [{"note": "G4", "len": "q", "lyric": "first syllable"}]

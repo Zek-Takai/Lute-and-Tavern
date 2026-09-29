@@ -72,7 +72,7 @@ export function renderTab() {
       b.innerHTML = ask + `<p class="muted">${esc(writerName())} is writing this one. The title, lyrics and Suno style appear here when the first draft is ready.</p>`;
       return;
     }
-    const f: [string, string][] = [['Song title', s.title], ['Style of music', s.style], ['Exclude styles', s.exclude], ['Lyrics', s.lyrics]];
+    const f: [string, string][] = [['Song title', s.title], ['Style of music', s.style], ...(s.exclude ? [['Exclude styles (under More Options)', s.exclude] as [string, string]] : []), ['Lyrics', s.lyrics]];
     b.innerHTML =
       ask +
       `<p class="small muted" style="margin-top:0">Each box matches a field in Suno's custom mode. Copy one, paste it, come back for the next. Want changes? Use the Talk to ${esc(writerName())} tab.</p>` +
