@@ -21,10 +21,14 @@
 - Lyrics view with timing while a song plays
 - Edit file tags in place (write back to the audio file), with a clear opt-in
 
-## To discuss before building
-- **YouTube songs** (a friend's idea): save YouTube / YouTube Music links as songs and play them in the app.
-  Allowed only through YouTube's embedded player, which must stay visible (at least 200x200 px); audio-only or
-  background playback and pulling the audio stream are against YouTube's API terms. So YouTube songs would have
-  no visualizer reaction, no stems, no offline play, and ads without Premium. Desktop apps built like this one
-  hit YouTube's "Error 153" (no web referrer), which needs a small relay page on a real website (Cloudflare).
-  Sources: developers.google.com/youtube/terms/developer-policies, tauri-apps/tauri issue 14422.
+## Streaming services
+- **YouTube: dropped** (2026-09-29). Only its visible embedded player is allowed, and ad-free playback cannot be
+  had legitimately inside a desktop app (Google blocks sign-in in app web views; embeds need third-party cookies).
+  Adding it would turn into fighting ads, which is not what this app is for.
+- Friendlier options researched, not yet chosen:
+  - Apple Music via MusicKit (official, no ads, needs each user's Apple Music subscription; audio is DRM, so no
+    visualizer or stems for those songs; needs a Swift bridge).
+  - Audius (free open API, no ads, real streams; independent catalog; credit artists).
+  - Jamendo (Creative Commons catalog; free API for non-commercial apps).
+  - Self-hosted server on the NAS (Navidrome/Jellyfin, Subsonic API): stream your own collection anywhere.
+  - Not viable: Spotify (DRM, 250k-MAU gate), TIDAL (player SDK only for web/iOS/Android), SoundCloud (invite-only API).
