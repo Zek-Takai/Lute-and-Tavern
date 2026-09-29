@@ -8,7 +8,8 @@
 - Takes for songwriter songs, master take plays in the library
 - Sheet music: click-to-write melody editor, chords, lyrics under notes, transpose, PDF/image/MusicXML attachments, MusicXML export
 - Background visualizer; settings
-- Signed with Developer ID and notarized: `scripts/build-mac.sh`
+- Everyday builds signed locally; version milestones get the official build (`scripts/build-mac.sh --release`: Developer ID, notarization, update files)
+- In-app updates built in, off by default (Settings > Updates); only official releases can update themselves
 
 ## Next
 - Linux and Windows builds (on Windows, reordering the queue by dragging needs a different drag mode)
@@ -18,5 +19,4 @@
   Not Demucs: its weights are licensed for scientific use only. Fine-tune only if stock accuracy on real songs is poor.
 - Local music generation: render a songwriter song to audio on your own machine (open models such as ACE-Step), landing as a take
 - Lyrics view with timing while a song plays
-- In-app updates (Tauri updater): deferred until the app has users. People on versions without it update by downloading the new release
 - Edit file tags in place (write back to the audio file), with a clear opt-in

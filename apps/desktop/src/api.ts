@@ -41,6 +41,8 @@ export interface Folder { id: number; path: string }
 export interface ScanReport { added: number; updated: number; removed: number; untagged: number }
 export interface Snapshot { songs: Song[]; playlists: Playlist[]; genres: GenreTag[]; folders: Folder[]; settings: Record<string, unknown> }
 export interface WriterSettings { baseUrl: string; model: string; name: string; hasKey: boolean }
+export interface UpdateInfo { canUpdate: boolean; currentVersion: string; defaultUrl: string }
+export interface Available { version: string; notes: string }
 export interface SongPatch { title?: string; artist?: string; album?: string; year?: string; genre?: string }
 
 export const api = {
@@ -77,6 +79,9 @@ export const api = {
   writerModels: (baseUrl: string, apiKey: string | null) => invoke<string[]>('writer_models', { baseUrl, apiKey }),
   requestSong: (request: string, genre: string | null) => invoke<Song>('request_song', { request, genre }),
   rewriteSong: (id: number, instruction: string) => invoke<void>('rewrite_song', { id, instruction }),
+  updateInfo: () => invoke<UpdateInfo>('update_info'),
+  checkUpdate: () => invoke<Available | null>('check_update'),
+  installUpdate: () => invoke<void>('install_update'),
 };
 
 /** URL for a file served by the app's `lt://` protocol. */

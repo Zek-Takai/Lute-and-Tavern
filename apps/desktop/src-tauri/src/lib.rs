@@ -1,6 +1,7 @@
 //! Lute & Tavern desktop app: Tauri commands over lt-core, the `lt://` file protocol and the music-folder watcher.
 
 mod protocol;
+mod updates;
 mod watch;
 mod writer;
 
@@ -248,6 +249,8 @@ pub fn emit_library_changed(app: &tauri::AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updates::Pending::default())
         .register_asynchronous_uri_scheme_protocol("lt", protocol::handle)
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
@@ -303,6 +306,9 @@ pub fn run() {
             writer::writer_models,
             writer::request_song,
             writer::rewrite_song,
+            updates::update_info,
+            updates::check_update,
+            updates::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lute & Tavern");

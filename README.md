@@ -24,7 +24,12 @@ npm run tauri dev      # run in development
 npm run tauri build    # produce the app bundle (macOS: .app and .dmg under target/release/bundle)
 ```
 
-On a Mac, `scripts/build-mac.sh` (run in Terminal, not over SSH) builds and signs the app with the best certificate in your keychain.
+On a Mac, run the build script in Terminal (not over SSH, since signing needs your keychain):
+
+- `scripts/build-mac.sh` is the everyday build: signed, not notarized, ready in about a minute.
+- `scripts/build-mac.sh --release` is for version milestones: Developer ID signature, Apple notarization, a disk image, and in-app update files. See the notes at the top of the script.
+
+In-app updates are built in but off by default; each person turns them on in Settings, and only official releases can update themselves.
 
 Tests: `cargo test --workspace` from the repository root.
 

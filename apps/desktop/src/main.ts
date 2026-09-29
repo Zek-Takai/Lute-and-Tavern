@@ -15,7 +15,7 @@ import { api, errText } from './api';
 import { initPlayer, initQueue, initSeek, refreshQueue, setRepeat, step, togglePlay } from './player';
 import { onRender, reload, state, visible, writerName } from './state';
 import { initLibrary, renderChips, renderGrid, renderHead, renderSide } from './ui/library';
-import { addMusicFolder, openSettings } from './ui/settings';
+import { addMusicFolder, checkForUpdatesAtStart, openSettings } from './ui/settings';
 import { initSheetKeys } from './ui/sheet';
 import { activeTab, cur, initSong, refreshSong } from './ui/song';
 import { $, toast } from './util';
@@ -157,6 +157,7 @@ async function boot() {
   startVisualizer($<HTMLCanvasElement>('#viz'));
   await initEvents();
   await initDragDrop();
+  void checkForUpdatesAtStart();
 }
 
 boot().catch((e) => toast(errText(e)));
