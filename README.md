@@ -2,7 +2,8 @@
 
 A desktop music app: your music library, an AI songwriter, and sheet music in one place.
 
-- **Your music.** Point it at your music folders. Songs are read from their own tags (title, artist, album, year, genre, cover art) and the folders stay in sync as you add, change or delete files.
+- **A tidy library.** Drop songs in and each gets its own folder with its stems, takes, sheet music, cover and a `song.json` of everything the app knows. Other artists' albums stay together as Artist/Album.
+- **Your music.** Point it at your other music folders too. Songs are read from their own tags (title, artist, album, year, genre, cover art) and the folders stay in sync as you add, change or delete files.
 - **Genre tags.** Every song carries one genre tag. Built-in tags make picking quick, you can create your own, and tags from your files and from the songwriter join the list.
 - **Playlists, queue and repeat.** Build playlists, reorder what plays next, repeat a playlist or a single song.
 - **A songwriter.** Describe a song and an AI of your choice writes the lyrics, a Suno style prompt and a chorus melody. Ask for changes in plain words; every rewrite is kept as a version. Works with any OpenAI-compatible server, local or hosted.

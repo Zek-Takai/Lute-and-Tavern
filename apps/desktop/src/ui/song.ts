@@ -153,7 +153,16 @@ export function renderTab() {
     <div class="pl-list">${state.playlists.map((p) => `<label><input type="checkbox" data-pl="${p.id}" ${s.playlists.includes(p.id) ? 'checked' : ''}>${esc(p.name)}</label>`).join('')}
       <button class="btn small" id="plAddNew">New playlist with this song</button></div>
     <p class="small muted">Every song carries one genre tag. Pick one of yours or type a new tag and it is created for you.</p>
-    <div class="row danger-zone"><button class="btn small" id="delSong">Remove from library</button><span class="muted small" id="delNote"></span></div>`;
+    <dl class="kv facts">
+      ${s.duration ? `<dt>Length</dt><dd>${Math.floor(s.duration / 60)}:${String(Math.round(s.duration % 60)).padStart(2, '0')}</dd>` : ''}
+      ${s.stemFiles.length ? `<dt>Stems</dt><dd>${pickStems(s.stemFiles).length} parts</dd>` : ''}
+      ${s.takes.length ? `<dt>Takes</dt><dd>${s.takes.length}</dd>` : ''}
+      <dt>Added</dt><dd>${date(s.addedAt)}</dd>
+      ${s.songDir ? `<dt>Folder</dt><dd class="path-text">${esc(s.songDir)}</dd>` : ''}
+    </dl>
+    ${s.songDir
+      ? '<p class="small muted">This song lives in your library folder. To remove it, move its folder out of the library or to the Trash.</p>'
+      : '<div class="row danger-zone"><button class="btn small" id="delSong">Remove from library</button><span class="muted small" id="delNote"></span></div>'}`;
     b.querySelectorAll<HTMLInputElement>('[data-k]').forEach((inp) => (inp.onchange = async () => {
       try {
         await api.updateSong(s.id, { [inp.dataset.k!]: inp.value });
@@ -180,7 +189,8 @@ export function renderTab() {
       toast(`Added to ${p.name}`);
     };
     let armed = false;
-    $('#delSong').onclick = async () => {
+    const del = document.getElementById('delSong');
+    if (del) del.onclick = async () => {
       if (!armed) {
         armed = true;
         $('#delSong').textContent = 'Yes, remove it';

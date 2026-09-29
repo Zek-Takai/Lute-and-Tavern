@@ -71,8 +71,11 @@ function cover(s: Song) {
 export function renderGrid() {
   const list = visible(), q = state.query.trim();
   const empty = !state.songs.length
-    ? `<div class="empty welcome"><h2>Welcome to the tavern</h2><p>Add the folder where your music lives, or ask ${esc(writerName())} to write you a song.</p>
-        <div class="row" style="justify-content:center"><button class="btn primary" data-act="addFolder">Add a music folder</button><button class="btn" data-act="request">Request a song</button></div></div>`
+    ? state.folders.some((f) => f.managed)
+      ? `<div class="empty welcome"><h2>Welcome to the tavern</h2><p>Drag songs onto the window to add them to your library, or ask ${esc(writerName())} to write you a song.</p>
+          <div class="row" style="justify-content:center"><button class="btn" data-act="addFolder">Watch an existing music folder</button><button class="btn primary" data-act="request">Request a song</button></div></div>`
+      : `<div class="empty welcome"><h2>Welcome to the tavern</h2><p>First, pick where your library lives. Songs you add are kept there, each in its own folder with its stems, cover and details.</p>
+          <div class="row" style="justify-content:center"><button class="btn primary" data-act="libSuggested">Use Music › Lute &amp; Tavern</button><button class="btn" data-act="libChoose">Choose a folder…</button></div></div>`
     : `<p class="empty">${q ? `Nothing matches "${esc(q)}". Try a title, artist, album or lyric.` : state.view.kind === 'pl' ? 'This playlist is empty. Open any song and tick this playlist under Details.' : 'No songs here yet.'}</p>`;
   $('#grid').innerHTML = list.length
     ? list
@@ -96,7 +99,7 @@ export function renderGrid() {
   syncIcons();
 }
 
-export function initLibrary(actions: { addFolder: () => void; request: () => void }) {
+export function initLibrary(actions: { addFolder: () => void; request: () => void; setupLibrary: (suggested: boolean) => void }) {
   $('#side').onclick = async (e) => {
     const t = e.target as HTMLElement;
     const tab = t.closest<HTMLElement>('[data-st]');
@@ -180,6 +183,8 @@ export function initLibrary(actions: { addFolder: () => void; request: () => voi
     const act = t.closest<HTMLElement>('[data-act]')?.dataset.act;
     if (act === 'addFolder') return actions.addFolder();
     if (act === 'request') return actions.request();
+    if (act === 'libSuggested') return actions.setupLibrary(true);
+    if (act === 'libChoose') return actions.setupLibrary(false);
     const p = t.closest<HTMLElement>('[data-play]');
     if (p) {
       e.stopPropagation();

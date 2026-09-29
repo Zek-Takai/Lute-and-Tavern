@@ -10,7 +10,8 @@ lute-and-tavern/
 │       └── src/
 │           ├── db.rs          SQLite schema and migrations (append-only list)
 │           ├── library.rs     songs, folders, playlists, genre tags, sheets, takes, settings
-│           ├── tags.rs        reading audio files: tags, length, cover art, file-name fallbacks
+│           ├── organize.rs    the managed library folder: song folders, stems, song.json, moves and renames
+│           ├── tags.rs        reading audio files: tags, length, cover art, stems, file-name fallbacks
 │           ├── genre.rs       genre normalization (ID3 numbers, casing)
 │           └── songwriter.rs  OpenAI-compatible client: write and rewrite songs
 ├── apps/
@@ -30,6 +31,22 @@ lute-and-tavern/
     └── icon/                  app icon source (SVG) and master PNG
 ```
 
+## The library folder (the person's music)
+
+One folder is the library; the app organizes it. Other music folders are only watched, never changed.
+
+```
+<library>/Songs/<Title>/<Title>.<ext>         the song (songwriter songs, singles, anything with stems)
+<library>/Songs/<Title>/stems/<Part>.<ext>    its parts: Vocals, Drums... (wav and mp3 of a part may both exist)
+<library>/Songs/<Title>/takes/  sheets/       takes and sheet music added in the app
+<library>/Songs/<Title>/cover.<ext>           artwork
+<library>/Songs/<Title>/song.json             everything the app knows; a copied folder restores from it
+<library>/Albums/<Artist>/<Album>/NN - <Title>.<ext>   other artists' albums, kept together
+```
+
+Files dropped anywhere else in the library are moved into place once they finish copying.
+Stem files named "Title (Part).ext" join their song. Renaming a song renames its folder and file.
+
 ## Where the app keeps its data
 
 Per-user app data folder (macOS: `~/Library/Application Support/com.luteandtavern.app/`):
@@ -41,7 +58,8 @@ sheets/<song id>/      uploaded sheet music for a song
 takes/<song id>/       audio takes for songwriter songs
 ```
 
-Music files in watched folders are never modified, moved or deleted by the app.
+Music files in other watched folders are never modified, moved or deleted by the app. In the
+library folder the app moves and renames files into the layout above, but never deletes music.
 The songwriter's API key lives in the system keychain, never in the database.
 
 ## Boundaries

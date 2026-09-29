@@ -149,6 +149,55 @@ async fn import_paths(app: tauri::AppHandle, state: State<'_, AppState>, paths: 
     Ok(report)
 }
 
+/// Makes a folder the library: the app organizes it into song folders from now on.
+#[tauri::command]
+async fn set_library_folder(app: tauri::AppHandle, state: State<'_, AppState>, path: String) -> Res<ScanReport> {
+    let report = blocking(&state, move |l| {
+        let f = l.set_library_folder(&PathBuf::from(path))?;
+        l.scan_folder(&f)
+    })
+    .await?;
+    state.watcher.refresh(&app);
+    Ok(report)
+}
+
+/// Songs dropped on the window or picked with "Add songs to my library": audio files move into the
+/// library folder and get organized; folders are watched where they are.
+#[tauri::command]
+async fn add_to_library(app: tauri::AppHandle, state: State<'_, AppState>, paths: Vec<String>) -> Res<ScanReport> {
+    let (report, watched) = blocking(&state, move |l| {
+        let Some(lib) = l.library_folder()? else { anyhow::bail!("Choose a library folder in Settings first.") };
+        let root = PathBuf::from(&lib.path);
+        let mut watched = false;
+        let mut total = ScanReport::default();
+        for p in paths.iter().map(PathBuf::from) {
+            if p.is_dir() {
+                if !p.starts_with(&root) {
+                    let f = l.add_folder(&p)?;
+                    let r = l.scan_folder(&f)?;
+                    total.added += r.added;
+                    total.untagged += r.untagged;
+                    watched = true;
+                }
+            } else if lt_core::tags::is_audio(&p) && !p.starts_with(&root) {
+                let name = p.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+                lt_core::organize::move_file(&p, &root.join(name))?;
+            }
+        }
+        // Freshly moved files count as settled: they were complete before the move.
+        let r = l.scan_folder_now(&lib)?;
+        total.added += r.added;
+        total.updated += r.updated;
+        total.untagged += r.untagged;
+        Ok((total, watched))
+    })
+    .await?;
+    if watched {
+        state.watcher.refresh(&app);
+    }
+    Ok(report)
+}
+
 // ---------- playlists ----------
 
 #[tauri::command]
@@ -287,6 +336,8 @@ pub fn run() {
             remove_folder,
             rescan,
             import_paths,
+            set_library_folder,
+            add_to_library,
             create_playlist,
             rename_playlist,
             delete_playlist,

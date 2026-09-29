@@ -33,6 +33,8 @@ export interface Song {
   hasFile: boolean;
   /** Number of stem files attached. */
   stems: number;
+  /** The song's own folder when it lives in the library folder. */
+  songDir: string | null;
 }
 export interface Take { id: number; name: string; origin: string; addedAt: number }
 export interface Version { id: number; label: string; note: string; createdAt: number }
@@ -42,7 +44,7 @@ export interface Sheet { id: number; name: string; kind: 'pdf' | 'image' | 'musi
 export interface SongDetail extends Song { takes: Take[]; versions: Version[]; messages: Message[]; sheets: Sheet[]; playlists: number[]; stemFiles: Stem[] }
 export interface Playlist { id: number; name: string; songs: number[] }
 export interface GenreTag { id: number; name: string; origin: 'default' | 'user' | 'writer' | 'file'; songs: number }
-export interface Folder { id: number; path: string }
+export interface Folder { id: number; path: string; managed: boolean }
 export interface ScanReport { added: number; updated: number; removed: number; untagged: number }
 export interface Snapshot { songs: Song[]; playlists: Playlist[]; genres: GenreTag[]; folders: Folder[]; settings: Record<string, unknown> }
 export interface WriterSettings { baseUrl: string; model: string; name: string; hasKey: boolean }
@@ -62,6 +64,8 @@ export const api = {
   removeFolder: (id: number) => invoke<void>('remove_folder', { id }),
   rescan: () => invoke<ScanReport>('rescan'),
   importPaths: (paths: string[]) => invoke<ScanReport>('import_paths', { paths }),
+  setLibraryFolder: (path: string) => invoke<ScanReport>('set_library_folder', { path }),
+  addToLibrary: (paths: string[]) => invoke<ScanReport>('add_to_library', { paths }),
   createPlaylist: (name: string, songs: number[]) => invoke<Playlist>('create_playlist', { name, songs }),
   renamePlaylist: (id: number, name: string) => invoke<void>('rename_playlist', { id, name }),
   deletePlaylist: (id: number) => invoke<void>('delete_playlist', { id }),

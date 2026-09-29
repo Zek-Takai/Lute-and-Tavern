@@ -1,7 +1,8 @@
 // Settings: the songwriter connection, music folders, genre tags and the sidebar's starting tab.
+import { audioDir, join } from '@tauri-apps/api/path';
 import { open as pickFolder } from '@tauri-apps/plugin-dialog';
 import { api, errText, type UpdateInfo } from '../api';
-import { reload, rerender, saveSetting, state } from '../state';
+import { libraryFolder, reload, rerender, saveSetting, state } from '../state';
 import { $, esc, toast } from '../util';
 
 const ORIGIN: Record<string, string> = { default: 'Built in', user: 'Yours', writer: 'Made by the songwriter', file: 'From your music files' };
@@ -25,6 +26,52 @@ export async function addMusicFolder() {
 }
 
 let updates: UpdateInfo = { canUpdate: false, currentVersion: '', defaultUrl: '' };
+
+const reportText = (r: { added: number; untagged: number }) =>
+  `${r.added} song${r.added === 1 ? '' : 's'} added${r.untagged ? `. ${r.untagged} had no genre tag and wait in Unsorted.` : '.'}`;
+
+/** Makes `path` the library folder; its files get organized into song folders. */
+export async function useAsLibrary(path: string) {
+  toast('Organizing your library…');
+  try {
+    const r = await api.setLibraryFolder(path);
+    await reload();
+    state.view = { kind: 'all' };
+    rerender();
+    toast(`Library ready. ${reportText(r)}`);
+    return true;
+  } catch (e) {
+    toast(errText(e));
+    return false;
+  }
+}
+
+/** Sets up the suggested library folder (~/Music/Lute & Tavern) or one the person picks. */
+export async function chooseLibrary(suggested: boolean) {
+  const path = suggested
+    ? await join(await audioDir(), 'Lute & Tavern')
+    : await pickFolder({ directory: true, multiple: false, title: 'Choose your library folder' });
+  if (typeof path !== 'string') return false;
+  return useAsLibrary(path);
+}
+
+/** Moves songs into the library folder, where they get sorted into song folders. */
+export async function addSongsToLibrary(paths: string[]) {
+  if (!libraryFolder()) {
+    toast('Choose where your library lives first.');
+    await openSettings();
+    return;
+  }
+  toast('Adding to your library…');
+  try {
+    const r = await api.addToLibrary(paths);
+    await reload();
+    rerender();
+    toast(reportText(r));
+  } catch (e) {
+    toast(errText(e));
+  }
+}
 
 export async function openSettings(section?: 'writer') {
   state.writer = await api.writerConfig();
@@ -55,10 +102,18 @@ function render() {
     </section>
 
     <section class="set-sec">
-      <h3>Music folders</h3>
-      <p class="muted small">Lute &amp; Tavern watches these folders. Songs you add, change or delete in them update here on their own.</p>
-      <ul class="set-list">${state.folders.map((f) => `<li><span class="path">${esc(f.path)}</span><button class="btn small" data-rm-folder="${f.id}">Stop watching</button></li>`).join('') || '<li class="muted">No folders yet.</li>'}</ul>
-      <div class="row"><button class="btn" id="fAdd">Add a music folder</button>${state.folders.length ? '<button class="btn" id="fScan">Check folders now</button>' : ''}</div>
+      <h3>Library folder</h3>
+      <p class="muted small">Songs you add go here and get sorted: each song gets its own folder with its stems, takes, sheet music, cover and a song.json of everything the app knows. Other artists' albums are kept together as Albums/Artist/Album.</p>
+      ${libraryFolder()
+        ? `<ul class="set-list"><li><span class="path">${esc(libraryFolder()!.path)}</span><button class="btn small" id="libChange">Change…</button></li></ul>`
+        : `<div class="row"><button class="btn primary" id="libSuggested">Use Music › Lute &amp; Tavern</button><button class="btn" id="libChoose">Choose a folder…</button></div>`}
+    </section>
+
+    <section class="set-sec">
+      <h3>Other music folders</h3>
+      <p class="muted small">Watched and played, never moved or renamed. Songs you add, change or delete in them update here on their own.</p>
+      <ul class="set-list">${state.folders.filter((f) => !f.managed).map((f) => `<li><span class="path">${esc(f.path)}</span><button class="btn small" data-make-lib="${esc(f.path)}">Make this my library</button><button class="btn small" data-rm-folder="${f.id}">Stop watching</button></li>`).join('') || '<li class="muted">None.</li>'}</ul>
+      <div class="row"><button class="btn" id="fAdd">Watch a music folder</button>${state.folders.length ? '<button class="btn" id="fScan">Check folders now</button>' : ''}</div>
     </section>
 
     <section class="set-sec">
@@ -120,6 +175,19 @@ function render() {
     toast('Key removed from your keychain');
   });
   $('#fAdd').onclick = async () => { if (await addMusicFolder()) render(); };
+  const reRender = async (ok: boolean) => { if (ok) { state.writer = await api.writerConfig(); render(); } };
+  document.getElementById('libSuggested')?.addEventListener('click', async () => reRender(await chooseLibrary(true)));
+  document.getElementById('libChoose')?.addEventListener('click', async () => reRender(await chooseLibrary(false)));
+  document.getElementById('libChange')?.addEventListener('click', async () => reRender(await chooseLibrary(false)));
+  document.querySelectorAll<HTMLElement>('[data-make-lib]').forEach((b) => (b.onclick = async () => {
+    if (b.dataset.armed !== '1') {
+      b.dataset.armed = '1';
+      b.textContent = 'Yes, organize it';
+      toast('This moves the files in that folder into song folders.');
+      return;
+    }
+    await reRender(await useAsLibrary(b.dataset.makeLib!));
+  }));
   $('#fScan')?.addEventListener('click', async () => {
     const r = await api.rescan().catch((e) => { toast(errText(e)); return null; });
     if (!r) return;

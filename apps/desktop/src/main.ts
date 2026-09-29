@@ -15,7 +15,7 @@ import { api, errText } from './api';
 import { initPlayer, initQueue, initSeek, refreshQueue, setRepeat, step, togglePlay } from './player';
 import { onRender, reload, state, visible, writerName } from './state';
 import { initLibrary, renderChips, renderGrid, renderHead, renderSide } from './ui/library';
-import { addMusicFolder, checkForUpdatesAtStart, openSettings } from './ui/settings';
+import { addMusicFolder, addSongsToLibrary, checkForUpdatesAtStart, chooseLibrary, openSettings } from './ui/settings';
 import { initSheetKeys } from './ui/sheet';
 import { activeTab, cur, initSong, refreshSong } from './ui/song';
 import { $, toast } from './util';
@@ -83,7 +83,7 @@ function initImport() {
   $('#impFiles').onclick = async () => {
     const paths = await pickFiles({ multiple: true, filters: [{ name: 'Audio', extensions: ['mp3', 'm4a', 'aac', 'flac', 'wav', 'ogg', 'opus', 'aiff', 'aif'] }] });
     $<HTMLDialogElement>('#imp').close();
-    if (Array.isArray(paths) && paths.length) await importPaths(paths);
+    if (Array.isArray(paths) && paths.length) await addSongsToLibrary(paths);
   };
 }
 
@@ -110,7 +110,7 @@ async function initDragDrop() {
     else if (p.type === 'drop') {
       over.hidden = true;
       if ($<HTMLDialogElement>('#dlg').open || !p.paths.length) return;
-      void importPaths(p.paths);
+      void (state.folders.some((f) => f.managed) ? addSongsToLibrary(p.paths) : importPaths(p.paths));
     }
   });
 }
@@ -142,7 +142,7 @@ async function boot() {
   initPlayer();
   initQueue();
   initSeek();
-  initLibrary({ addFolder: () => void addMusicFolder(), request: () => void openRequest() });
+  initLibrary({ addFolder: () => void addMusicFolder(), request: () => void openRequest(), setupLibrary: (suggested: boolean) => void chooseLibrary(suggested) });
   initSong();
   initSheetKeys(() => $<HTMLDialogElement>('#dlg').open && activeTab() === 'sheet');
   initRequest();

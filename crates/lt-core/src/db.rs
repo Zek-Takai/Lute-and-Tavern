@@ -118,6 +118,12 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX stems_song ON stems(song_id);
     "#,
+    // v4: the managed library folder, and each song's own folder inside it.
+    r#"
+    ALTER TABLE folders ADD COLUMN managed INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE songs ADD COLUMN song_dir TEXT;
+    CREATE INDEX songs_song_dir ON songs(song_dir);
+    "#,
 ];
 
 pub fn open(path: &std::path::Path) -> Result<Connection> {

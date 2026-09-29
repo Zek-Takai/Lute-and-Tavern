@@ -21,9 +21,20 @@ impl Watcher {
             let state = handle.state::<AppState>();
             let lib = &state.lib;
             let mut changed = false;
+            // The library folder is organized as a whole: new files get moved into song folders first.
+            if let Ok(Some(lib_folder)) = lib.library_folder() {
+                let root = Path::new(&lib_folder.path);
+                if events.iter().any(|e| e.path.starts_with(root))
+                    && let Ok(r) = lib.scan_folder(&lib_folder) {
+                        changed |= r.added + r.updated + r.removed > 0;
+                    }
+            }
             for ev in events {
                 let path = ev.path.as_path();
                 if path.is_dir() || !lt_core::tags::is_audio(path) {
+                    continue;
+                }
+                if lib.folder_for(path).ok().flatten().is_some_and(|f| f.managed) {
                     continue;
                 }
                 if path.exists() {

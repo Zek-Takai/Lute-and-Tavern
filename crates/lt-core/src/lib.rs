@@ -4,6 +4,7 @@
 pub mod db;
 pub mod genre;
 pub mod library;
+pub mod organize;
 pub mod songwriter;
 pub mod tags;
 
