@@ -449,7 +449,38 @@ impl Library {
             params![id, name, now()],
         )?;
         self.write_cover(id)?;
+        self.embed_art(id)?;
         self.song(id)
+    }
+
+    /// Writes the song's artwork into its own audio: its takes, and its main file when that lives in the
+    /// library folder (files in watched folders are never changed). Returns how many files got the cover.
+    pub fn embed_art(&self, id: i64) -> Result<usize> {
+        let (art, path, folder_id): (Option<String>, Option<String>, Option<i64>) = self.db().query_row(
+            "SELECT art, path, folder_id FROM songs WHERE id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
+        let Some(image) = art.and_then(|a| self.art_path(&a)) else { return Ok(0) };
+        let image = std::fs::read(image)?;
+        let mut files: Vec<PathBuf> = {
+            let db = self.db();
+            let mut st = db.prepare("SELECT path FROM takes WHERE song_id = ?1")?;
+            st.query_map([id], |r| r.get::<_, String>(0))?.flatten().map(PathBuf::from).collect()
+        };
+        if let (Some(p), Some(root)) = (path.map(PathBuf::from), self.managed_root(folder_id)) {
+            if p.starts_with(&root) {
+                files.push(p);
+            }
+        }
+        let mut n = 0;
+        for f in files {
+            let already = tags::read_track(&f, None).picture.is_some_and(|(b, _)| b == image);
+            if already || tags::embed_cover(&f, &image).is_ok() {
+                n += 1;
+            }
+        }
+        Ok(n)
     }
 
     pub fn clear_art(&self, id: i64) -> Result<Song> {
@@ -1272,7 +1303,9 @@ impl Library {
             params![song, id, t],
         )?;
         drop(db);
-        self.art_from_takes(song)?;
+        if !self.art_from_takes(song)? {
+            self.embed_art(song)?;
+        }
         self.write_sidecar(song)?;
         Ok(Take {
             id,
@@ -1607,6 +1640,7 @@ impl Library {
                 let name = self.store_art(&bytes, ext)?;
                 self.db().execute("UPDATE songs SET art = ?2, updated_at = ?3 WHERE id = ?1", params![song, name, now()])?;
                 self.write_cover(song)?;
+                self.embed_art(song)?;
                 self.write_sidecar(song)?;
                 return Ok(true);
             }
@@ -1614,7 +1648,8 @@ impl Library {
         Ok(false)
     }
 
-    /// Fills in artwork from takes or stems for songs that have none (songs from before this existed).
+    /// Fills in artwork from takes or stems for songs that have none, and writes each song's artwork into its
+    /// takes (songs from before this existed).
     pub fn backfill_take_art(&self) -> Result<usize> {
         let ids: Vec<i64> = {
             let db = self.db();
@@ -1627,6 +1662,14 @@ impl Library {
         let mut n = 0;
         for id in ids {
             n += self.art_from_takes(id)? as usize;
+        }
+        let with_art: Vec<i64> = {
+            let db = self.db();
+            let mut st = db.prepare("SELECT id FROM songs WHERE art IS NOT NULL AND EXISTS (SELECT 1 FROM takes t WHERE t.song_id = songs.id)")?;
+            st.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?
+        };
+        for id in with_art {
+            self.embed_art(id)?;
         }
         Ok(n)
     }

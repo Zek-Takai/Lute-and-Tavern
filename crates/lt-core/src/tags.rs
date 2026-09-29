@@ -223,3 +223,22 @@ mod tests {
         );
     }
 }
+
+/// Writes `image` into the audio file as its front cover, replacing any front cover already there, so the
+/// artwork travels with the file (Suno's M4A downloads come without one). Other tags are left as they are.
+pub fn embed_cover(path: &Path, image: &[u8]) -> anyhow::Result<()> {
+    use lofty::config::WriteOptions;
+    use lofty::picture::{MimeType, Picture, PictureType};
+    use lofty::tag::{Tag, TagExt};
+    let mut file = lofty::read_from_path(path)?;
+    if file.primary_tag_mut().is_none() {
+        let kind = file.primary_tag_type();
+        file.insert_tag(Tag::new(kind));
+    }
+    let tag = file.primary_tag_mut().ok_or_else(|| anyhow::anyhow!("{} cannot hold tags", path.display()))?;
+    let mime = if image.starts_with(b"\x89PNG") { MimeType::Png } else { MimeType::Jpeg };
+    tag.remove_picture_type(PictureType::CoverFront);
+    tag.push_picture(Picture::unchecked(image.to_vec()).pic_type(PictureType::CoverFront).mime_type(mime).build());
+    tag.save_to_path(path, WriteOptions::default())?;
+    Ok(())
+}
