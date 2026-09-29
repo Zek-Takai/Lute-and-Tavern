@@ -41,6 +41,7 @@ export interface Song {
   /** Artwork URL template from the service ({w}x{h}). */
   artUrl: string | null;
 }
+export interface McpInfo { enabled: boolean; running: boolean; url: string; error: string | null }
 export interface Take { id: number; name: string; origin: string; addedAt: number }
 export interface Version { id: number; label: string; note: string; createdAt: number }
 export interface Message { role: 'user' | 'writer'; text: string; createdAt: number }
@@ -96,6 +97,10 @@ export const api = {
   saveExternalSong: (song: unknown) => invoke<Song>('save_external_song', { song }),
   logEvent: (level: string, message: string) => invoke<void>('log_event', { level, message }).catch(() => {}),
   updateInfo: () => invoke<UpdateInfo>('update_info'),
+  mcpInfo: () => invoke<McpInfo>('mcp_info'),
+  mcpSetEnabled: (enabled: boolean) => invoke<McpInfo>('mcp_set_enabled', { enabled }),
+  mcpToken: () => invoke<string>('mcp_token'),
+  mcpNewToken: () => invoke<McpInfo>('mcp_new_token'),
   checkUpdate: () => invoke<Available | null>('check_update'),
   installUpdate: () => invoke<void>('install_update'),
 };

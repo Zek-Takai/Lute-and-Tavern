@@ -15,12 +15,13 @@ fn api_key() -> Option<String> {
     keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_USER).ok()?.get_password().ok()
 }
 
-fn config(state: &AppState) -> WriterConfig {
+pub fn config(state: &AppState) -> WriterConfig {
     let l = &state.lib;
     WriterConfig {
         base_url: l.setting_str("writerBaseUrl").unwrap_or_default(),
         model: l.setting_str("writerModel").unwrap_or_default(),
         name: l.setting_str("writerName").unwrap_or_else(|| DEFAULT_NAME.into()),
+        exclude: l.setting_bool("writerExclude"),
         api_key: api_key(),
     }
 }

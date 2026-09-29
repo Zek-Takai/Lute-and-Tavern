@@ -2759,6 +2759,7 @@ name = "lute-and-tavern"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "getrandom 0.3.4",
  "jsonwebtoken",
  "keyring",
  "lt-core",
@@ -2773,6 +2774,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-localhost",
  "tauri-plugin-updater",
+ "tiny_http",
 ]
 
 [[package]]

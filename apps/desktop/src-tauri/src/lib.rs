@@ -1,6 +1,7 @@
 //! Lute & Tavern desktop app: Tauri commands over lt-core, the `lt://` file protocol and the music-folder watcher.
 
 mod log;
+mod mcp;
 mod musickit;
 mod protocol;
 mod secure;
@@ -358,6 +359,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updates::Pending::default())
         .manage(musickit::TokenCache::default())
+        .manage(mcp::Running::default())
         .register_asynchronous_uri_scheme_protocol("lt", protocol::handle)
         .setup(|app| {
             main_window(app)?;
@@ -365,6 +367,11 @@ pub fn run() {
             log::init(&dir);
             let lib = Arc::new(Library::open(&dir)?);
             app.manage(AppState { lib, watcher: watch::Watcher::default() });
+            if app.state::<AppState>().lib.setting_bool("mcpEnabled") {
+                if let Err(e) = mcp::start(app.handle()) {
+                    log::write("error", &format!("MCP server: {e}"));
+                }
+            }
             let handle = app.handle().clone();
             // Catch up on anything that changed while the app was closed, then start watching.
             tauri::async_runtime::spawn_blocking(move || {
@@ -431,6 +438,10 @@ pub fn run() {
             updates::update_info,
             updates::check_update,
             updates::install_update,
+            mcp::mcp_info,
+            mcp::mcp_set_enabled,
+            mcp::mcp_token,
+            mcp::mcp_new_token,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lute & Tavern");

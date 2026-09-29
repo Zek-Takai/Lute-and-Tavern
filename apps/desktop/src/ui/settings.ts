@@ -1,11 +1,11 @@
 // Settings: the songwriter connection, music folders, genre tags and the sidebar's starting tab.
 import { audioDir, join } from '@tauri-apps/api/path';
 import { open as pickFolder } from '@tauri-apps/plugin-dialog';
-import { api, errText, type UpdateInfo } from '../api';
+import { api, errText, type McpInfo, type UpdateInfo } from '../api';
 import { applyLineColor, applySkin, LINE_COLORS, SKINS } from '../player';
 import { appleStatus, connectApple, disconnectApple, forgetAppleKey, isConnected, musicKit, setAppleKey, type AppleStatus } from '../apple';
 import { libraryFolder, reload, rerender, saveSetting, state } from '../state';
-import { $, esc, toast } from '../util';
+import { $, copyText, esc, toast } from '../util';
 
 const ORIGIN: Record<string, string> = { default: 'Built in', user: 'Yours', writer: 'Made by the songwriter', file: 'From your music files' };
 
@@ -28,6 +28,7 @@ export async function addMusicFolder() {
 }
 
 let updates: UpdateInfo = { canUpdate: false, currentVersion: '', defaultUrl: '' };
+let mcp: McpInfo = { enabled: false, running: false, url: '', error: null };
 let apple: AppleStatus = { ready: false, builtIn: false, keyId: '', teamId: '' };
 
 const reportText = (r: { added: number; untagged: number }) =>
@@ -79,6 +80,7 @@ export async function addSongsToLibrary(paths: string[]) {
 export async function openSettings(section?: 'writer') {
   state.writer = await api.writerConfig();
   updates = await api.updateInfo();
+  mcp = await api.mcpInfo().catch(() => mcp);
   apple = await appleStatus().catch(() => apple);
   if (apple.ready) await musicKit().catch(() => {});
   render();
@@ -102,6 +104,7 @@ function render() {
         <label for="wModel">Model</label><input id="wModel" value="${esc(w.model)}" list="wModels" placeholder="Check the connection to list models">
         <label for="wKey">API key</label><input id="wKey" type="password" autocomplete="off" placeholder="${w.hasKey ? 'Saved in your keychain. Type to replace it.' : 'Only needed for hosted services'}">
       </div>
+      <label class="row small"><input type="checkbox" id="wExclude" ${state.settings.writerExclude ? 'checked' : ''}> Also write Suno's Exclude styles (under More Options in Suno)</label>
       <datalist id="wModels"></datalist>
       <div class="row"><button class="btn" id="wCheck">Check connection</button><button class="btn primary" id="wSave">Save songwriter</button>${w.hasKey ? '<button class="btn small" id="wForget">Remove saved key</button>' : ''}<span class="muted small" id="wStatus"></span></div>
     </section>
@@ -143,6 +146,16 @@ function render() {
           ${isConnected() ? '<button class="btn small" id="amOff">Disconnect</button>' : apple.ready ? '' : '<span class="muted">Available once the key is saved.</span>'}</li>
       </ol>
       <label class="row small"><input type="checkbox" id="amShow" ${state.settings.showAppleInLibrary === false ? '' : 'checked'}> Show saved Apple Music songs in my library (they always show in playlists and the Apple Music tab)</label>
+    </section>
+
+    <section class="set-sec">
+      <h3>AI apps (MCP)</h3>
+      <p class="muted small">Lets AI apps on this computer that support MCP (Claude, Hermes and others) write Suno songs straight into your library. They get a Suno songwriting guide and tools to list, create and revise written songs, nothing else. Only works while Lute &amp; Tavern is open.</p>
+      <label class="row"><input type="checkbox" id="mcpOn" ${mcp.enabled ? 'checked' : ''}> Let AI apps write songs here</label>
+      ${mcp.error ? `<p class="small" style="color:var(--danger, #c44)">${esc(mcp.error)}</p>` : ''}
+      ${mcp.enabled ? `<div class="form"><label>Address</label><input readonly value="${esc(mcp.url)}"></div>
+      <div class="row"><button class="btn small" id="mcpCopyUrl">Copy address</button><button class="btn small" id="mcpCopyToken">Copy token</button><button class="btn small" id="mcpCopyCfg">Copy setup for your AI app</button><button class="btn small" id="mcpNew">New token</button></div>
+      <p class="muted small">The token is kept in your system keychain. Give it only to apps you trust; New token cuts off every app using the old one.</p>` : ''}
     </section>
 
     <section class="set-sec">
@@ -303,6 +316,23 @@ function render() {
     }
   });
   document.getElementById('amForget')?.addEventListener('click', async () => { await forgetAppleKey(); apple = await appleStatus(); render(); });
+  $('#wExclude').onchange = (e) => void saveSetting('writerExclude', (e.target as HTMLInputElement).checked);
+  $('#mcpOn').onchange = async (e) => {
+    mcp = await api.mcpSetEnabled((e.target as HTMLInputElement).checked).catch((err) => ({ ...mcp, error: errText(err) }));
+    await reload();
+    render();
+  };
+  document.getElementById('mcpCopyUrl')?.addEventListener('click', () => copyText(mcp.url, 'Address'));
+  document.getElementById('mcpCopyToken')?.addEventListener('click', async () => copyText(await api.mcpToken(), 'Token'));
+  document.getElementById('mcpCopyCfg')?.addEventListener('click', async () => {
+    const cfg = { mcpServers: { 'lute-and-tavern': { type: 'http', url: mcp.url, headers: { Authorization: `Bearer ${await api.mcpToken()}` } } } };
+    copyText(JSON.stringify(cfg, null, 2), 'Setup');
+  });
+  document.getElementById('mcpNew')?.addEventListener('click', async () => {
+    mcp = await api.mcpNewToken().catch((err) => ({ ...mcp, error: errText(err) }));
+    render();
+    toast('New token made. Update it in your AI apps.');
+  });
   $('#uAuto').onchange = (e) => void saveSetting('autoUpdate', (e.target as HTMLInputElement).checked);
   $('#uUrl').onchange = (e) => void saveSetting('updateUrl', (e.target as HTMLInputElement).value.trim());
   $('#uCheck').onclick = async () => {

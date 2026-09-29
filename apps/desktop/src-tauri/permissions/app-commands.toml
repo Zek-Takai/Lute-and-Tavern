@@ -51,4 +51,8 @@ commands.allow = [
   "update_info",
   "check_update",
   "install_update",
+  "mcp_info",
+  "mcp_set_enabled",
+  "mcp_token",
+  "mcp_new_token",
 ]

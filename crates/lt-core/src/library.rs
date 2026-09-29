@@ -868,6 +868,10 @@ impl Library {
         Ok(())
     }
 
+    pub fn setting_bool(&self, key: &str) -> bool {
+        self.settings().ok().and_then(|m| m.get(key).and_then(|v| v.as_bool())).unwrap_or(false)
+    }
+
     pub fn setting_str(&self, key: &str) -> Option<String> {
         self.settings().ok()?.get(key).and_then(|v| v.as_str().map(String::from)).filter(|s| !s.is_empty())
     }
