@@ -1,6 +1,7 @@
 // Playback: real audio through the lt:// protocol, a synth preview for songs that only have a melody,
 // the now-playing queue and repeat modes. The analyser feeds both visualizers.
 import { api, lt, type Song, type Stem } from './api';
+import { applePause, applePosition, appleResume, appleSeek, appleStop, artUrl, playApple } from './apple';
 import { BEATS, IDX, SCALE, keyName } from './music/notation';
 import { byId, playable, saveSetting, setting, viewName, type Repeat } from './state';
 import { $, esc, hueOf, PAUSE, PLAY, toast } from './util';
@@ -14,7 +15,8 @@ type StemTrack = { name: string; el: HTMLAudioElement; gain: GainNode; src: Medi
 type Playing =
   | { kind: 'file'; id: string }
   | { kind: 'synth'; id: string; nodes: OscillatorNode[]; tick: number }
-  | { kind: 'stems'; id: string; tracks: StemTrack[] };
+  | { kind: 'stems'; id: string; tracks: StemTrack[] }
+  | { kind: 'apple'; id: string };
 export let playing: Playing | null = null;
 let nowSong: Song | null = null;
 let lastPlay: (() => void) | null = null;
@@ -55,6 +57,8 @@ export function stop() {
       playing.nodes.forEach((n) => { try { n.stop(); } catch { /* already stopped */ } });
       clearInterval(playing.tick);
       if (nowSong) onMelodyNote(nowSong, -1);
+    } else if (playing.kind === 'apple') {
+      void appleStop();
     } else if (playing.kind === 'stems') {
       for (const t of playing.tracks) {
         t.el.pause();
@@ -80,6 +84,10 @@ function mediaEls(): HTMLMediaElement[] {
 
 /** Current place and length of what is playing, or of the paused/restored song. */
 export function position() {
+  if (playing?.kind === 'apple') {
+    const p = applePosition();
+    return { cur: p.cur, dur: p.dur || nowSong?.duration || 0 };
+  }
   const e = mediaEls()[0];
   const fallback = nowSong?.duration ?? 0;
   if (!e) return { cur: resumeAt, dur: fallback };
@@ -90,6 +98,13 @@ export function position() {
 export function togglePause() {
   if (!playing) return;
   if (playing.kind === 'synth') return stop();
+  if (playing.kind === 'apple') {
+    if (paused) void appleResume();
+    else void applePause();
+    paused = !paused;
+    saveNowPlaying();
+    return syncIcons();
+  }
   const els = mediaEls();
   if (paused) {
     void ac?.resume();
@@ -112,7 +127,8 @@ export function seekTo(fraction: number) {
   const f = Math.max(0, Math.min(1, fraction));
   const { dur } = position();
   const els = mediaEls();
-  if (els.length && dur) for (const e of els) e.currentTime = f * dur;
+  if (playing?.kind === 'apple' && dur) void appleSeek(f * dur);
+  else if (els.length && dur) for (const e of els) e.currentTime = f * dur;
   else resumeAt = f * dur;
   paintScrub(f * dur, dur);
 }
@@ -162,6 +178,7 @@ export function playSong(s: Song, list?: Song[]) {
   }
   if (playing && playing.id === String(s.id)) return togglePause();
   const startAt = nowSong?.id === s.id ? resumeAt : 0;
+  if (s.provider === 'apple') return void startApple(s, startAt);
   if (s.hasFile) playFile(lt('audio', s.id), s, [s.artist, s.album].filter(Boolean).join(', '), String(s.id), startAt);
   else if (s.stems > 0) void playStems(s, startAt);
   else if (s.notes.length) playMelody(s);
@@ -237,6 +254,27 @@ export function pickStems(files: Stem[]) {
     if (!cur || (cur.format !== 'mp3' && f.format === 'mp3')) byName.set(f.name, f);
   }
   return [...byName.values()];
+}
+
+/** Apple Music songs play in Apple's own player; the app's queue and controls still drive them. */
+async function startApple(s: Song, startAt: number) {
+  stop();
+  const id = String(s.id);
+  playing = { kind: 'apple', id };
+  paused = false;
+  resumeAt = 0;
+  showNow(s, [s.artist, s.album].filter(Boolean).join(', ') + ' · Apple Music');
+  lastPlay = () => void startApple(s, takeResume());
+  syncIcons();
+  try {
+    await playApple(s, startAt, () => {
+      if (playing?.kind === 'apple' && playing.id === id) onEnded();
+    });
+  } catch (e) {
+    if (playing?.kind === 'apple' && playing.id === id) playing = null;
+    syncIcons();
+    toast(`Apple Music: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 const takeResume = () => {
@@ -481,8 +519,9 @@ function showNow(s: Song, sub: string) {
   $('#pTitle').textContent = s.title;
   $('#pSub').textContent = sub;
   const a = $('#pArt');
-  a.hidden = !s.art;
-  if (s.art) a.style.backgroundImage = `url('${lt('art', s.art)}')`;
+  const img = s.art ? lt('art', s.art) : artUrl(s.artUrl, 120);
+  a.hidden = !img;
+  if (img) a.style.backgroundImage = `url('${img}')`;
 }
 
 /** After the library reloads, keep queue entries pointing at fresh song objects. */
@@ -508,6 +547,7 @@ export function syncIcons() {
 
 export function thumb(s: Song) {
   if (s.art) return `<span class="th" style="background-image:url('${lt('art', s.art)}')"></span>`;
+  if (s.artUrl) return `<span class="th" style="background-image:url('${artUrl(s.artUrl, 80)}')"></span>`;
   const h = hueOf(s.title + s.artist);
   return `<span class="th" style="background-image:linear-gradient(135deg,hsl(${h} 55% 38%),hsl(${(h + 50) % 360} 60% 18%))">${esc((s.title[0] || '♪').toUpperCase())}</span>`;
 }
@@ -521,7 +561,7 @@ export function renderQueue() {
           const now = i === qi && nowSong?.id === s.id;
           return `<li class="qi${now ? ' now' : ''}" draggable="true" data-i="${i}">
         <span class="grip" aria-hidden="true">⋮⋮</span>${thumb(s)}
-        <span class="nm"><b>${esc(s.title)}</b><span>${esc([s.artist, s.genre].filter(Boolean).join(', '))}</span></span>
+        <span class="nm"><b>${esc(s.title)}</b><span>${esc([s.artist, s.provider === 'apple' ? 'Apple Music' : s.genre].filter(Boolean).join(', '))}</span></span>
         ${now ? '<canvas id="qEq" width="56" height="36" aria-hidden="true"></canvas>' : '<span></span>'}
         <span class="acts"><button data-mv="-1" aria-label="Move up">▲</button><button data-mv="1" aria-label="Move down">▼</button><button data-rm aria-label="Remove from list">✕</button></span>
       </li>`;

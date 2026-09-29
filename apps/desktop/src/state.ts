@@ -1,8 +1,8 @@
 // App state: the library snapshot from Rust plus what the person is looking at.
 import { api, type Snapshot, type Song, type WriterSettings } from './api';
 
-export type View = { kind: 'all' | 'ai' | 'library' } | { kind: 'pl'; id: number } | { kind: 'album'; key: string };
-export type SideTab = 'library' | 'albums' | 'playlists' | 'genres';
+export type View = { kind: 'all' | 'ai' | 'library' } | { kind: 'pl'; id: number } | { kind: 'album'; key: string } | { kind: 'apple' };
+export type SideTab = 'library' | 'albums' | 'playlists' | 'genres' | 'apple';
 export type Repeat = 'off' | 'all' | 'one';
 
 export const state = {
@@ -45,9 +45,12 @@ export const byId = (id: number) => state.songs.find((s) => s.id === id);
 export const gkey = (g: string) => (g || 'Unsorted').toLowerCase();
 
 /** Genres that have songs, most used first; Unsorted last. */
+/** Songs that belong in the main library views (Apple songs can be kept out in Settings). */
+export const inMainLibrary = (s: Song) => !(s.provider === 'apple' && state.settings.showAppleInLibrary === false);
+
 export function genresInUse() {
   const map = new Map<string, { name: string; n: number }>();
-  for (const s of state.songs) {
+  for (const s of state.songs.filter(inMainLibrary)) {
     const k = gkey(s.genre);
     if (!map.has(k)) map.set(k, { name: s.genre || 'Unsorted', n: 0 });
     map.get(k)!.n++;
@@ -64,7 +67,7 @@ export const albumKey = (s: Song) => (s.album.trim() ? `${s.album.trim().toLower
 /** Albums with their songs; songs without an album form "Singles", listed first. */
 export function albums() {
   const map = new Map<string, { key: string; name: string; artist: string; songs: Song[] }>();
-  for (const s of state.songs) {
+  for (const s of state.songs.filter(inMainLibrary)) {
     const key = albumKey(s);
     if (!map.has(key)) map.set(key, { key, name: key === SINGLES ? 'Singles' : s.album.trim(), artist: key === SINGLES ? '' : s.artist, songs: [] });
     map.get(key)!.songs.push(s);
@@ -72,12 +75,14 @@ export function albums() {
   return [...map.values()].sort((a, b) => Number(b.key === SINGLES) - Number(a.key === SINGLES) || a.name.localeCompare(b.name) || a.artist.localeCompare(b.artist));
 }
 
-export const playable = (s: Song) => s.hasAudio || s.notes.length > 0;
+export const playable = (s: Song) => s.provider === 'apple' || s.hasAudio || s.notes.length > 0;
 
 function inView(s: Song) {
   const v = state.view;
+  if (v.kind === 'apple') return false;
   if (v.kind === 'ai') return s.source === 'ai';
-  if (v.kind === 'library') return s.source === 'library';
+  if (v.kind === 'library') return s.source === 'library' && s.provider === 'local';
+  if (s.provider === 'apple' && state.settings.showAppleInLibrary === false && v.kind !== 'pl') return false;
   if (v.kind === 'pl') return !!state.playlists.find((p) => p.id === v.id)?.songs.includes(s.id);
   if (v.kind === 'album') return albumKey(s) === v.key;
   return true;
@@ -114,6 +119,7 @@ export function viewName() {
   const v = state.view;
   if (v.kind === 'pl') return state.playlists.find((p) => p.id === v.id)?.name ?? 'Playlist';
   if (v.kind === 'album') return albums().find((a) => a.key === v.key)?.name ?? 'Album';
+  if (v.kind === 'apple') return 'Apple Music';
   const base = { all: 'All music', ai: `Written with ${writerName()}`, library: 'My music' }[v.kind];
   const g = state.genre === 'all' ? '' : genresInUse().find(([k]) => k === state.genre)?.[1].name;
   return g ? `${base}, ${g}` : base;

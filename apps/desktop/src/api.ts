@@ -35,6 +35,11 @@ export interface Song {
   stems: number;
   /** The song's own folder when it lives in the library folder. */
   songDir: string | null;
+  /** Where it plays from: 'local' (a file) or a service such as 'apple'. */
+  provider: string;
+  providerId: string | null;
+  /** Artwork URL template from the service ({w}x{h}). */
+  artUrl: string | null;
 }
 export interface Take { id: number; name: string; origin: string; addedAt: number }
 export interface Version { id: number; label: string; note: string; createdAt: number }
@@ -88,6 +93,7 @@ export const api = {
   writerModels: (baseUrl: string, apiKey: string | null) => invoke<string[]>('writer_models', { baseUrl, apiKey }),
   requestSong: (request: string, genre: string | null) => invoke<Song>('request_song', { request, genre }),
   rewriteSong: (id: number, instruction: string) => invoke<void>('rewrite_song', { id, instruction }),
+  saveExternalSong: (song: unknown) => invoke<Song>('save_external_song', { song }),
   logEvent: (level: string, message: string) => invoke<void>('log_event', { level, message }).catch(() => {}),
   updateInfo: () => invoke<UpdateInfo>('update_info'),
   checkUpdate: () => invoke<Available | null>('check_update'),

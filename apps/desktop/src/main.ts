@@ -17,6 +17,9 @@ import { onRender, reload, state, visible, writerName } from './state';
 import { initLibrary, renderChips, renderGrid, renderHead, renderSide } from './ui/library';
 import { addMusicFolder, addSongsToLibrary, checkForUpdatesAtStart, chooseLibrary, openSettings } from './ui/settings';
 import { initSheetKeys } from './ui/sheet';
+import { initApple } from './ui/apple';
+import { onAppleChange } from './apple';
+import { initSecureStorage } from './secureStorage';
 import { activeTab, cur, initSong, refreshSong } from './ui/song';
 import { $, toast } from './util';
 import { startVisualizer } from './visualizer';
@@ -136,6 +139,7 @@ async function initEvents() {
 }
 
 async function boot() {
+  await initSecureStorage();
   await reload();
   state.writer = await api.writerConfig().catch(() => state.writer);
   onRender(renderAll);
@@ -143,6 +147,8 @@ async function boot() {
   initQueue();
   initLibrary({ addFolder: () => void addMusicFolder(), request: () => void openRequest(), setupLibrary: (suggested: boolean) => void chooseLibrary(suggested), settings: () => void openSettings() });
   initSong();
+  initApple();
+  onAppleChange(() => renderAll());
   initSheetKeys(() => $<HTMLDialogElement>('#dlg').open && activeTab() === 'sheet');
   initRequest();
   initImport();

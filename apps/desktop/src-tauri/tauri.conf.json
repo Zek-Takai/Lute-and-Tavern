@@ -10,19 +10,9 @@
     "beforeBuildCommand": "npm run build"
   },
   "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "Lute & Tavern",
-        "width": 1320,
-        "height": 860,
-        "minWidth": 900,
-        "minHeight": 600,
-        "dragDropEnabled": true
-      }
-    ],
+    "windows": [],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' lt: http://lt.localhost data: blob:; media-src 'self' lt: http://lt.localhost blob:; connect-src 'self' ipc: http://ipc.localhost lt: http://lt.localhost ws://localhost:5173 http://localhost:5173; style-src 'self' 'unsafe-inline'; font-src 'self' data:; frame-src 'self' lt: http://lt.localhost"
+      "csp": "default-src 'self'; script-src 'self' https://js-cdn.music.apple.com; img-src 'self' lt: http://lt.localhost data: blob: https:; media-src 'self' lt: http://lt.localhost blob: https:; connect-src 'self' ipc: http://ipc.localhost lt: http://lt.localhost ws://localhost:5173 http://localhost:5173 https://*.apple.com https://*.mzstatic.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; frame-src 'self' lt: http://lt.localhost https://*.apple.com"
     }
   },
   "bundle": {

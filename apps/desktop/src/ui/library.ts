@@ -2,8 +2,10 @@
 import { api, errText, lt, type Song } from '../api';
 import { playSong, syncIcons } from '../player';
 import { keyName, staffSVG, toMeasures } from '../music/notation';
-import { albums, genresInUse, playable, rerender, reload, saveSetting, state, viewName, visible, writerName, type SideTab } from '../state';
+import { albums, genresInUse, inMainLibrary, playable, rerender, reload, saveSetting, state, viewName, visible, writerName, type SideTab } from '../state';
 import { $, esc, hueOf, PLAY, toast } from '../util';
+import { artUrl } from '../apple';
+import { appleHead, applePanel, handleApplePanelClick, renderAppleGrid } from './apple';
 import { openSong } from './song';
 
 export const STATUS: Record<string, [string, string]> = {
@@ -21,16 +23,17 @@ const ICONS: Record<SideTab | 'settings', string> = {
   albums: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/><path d="M12 3a9 9 0 0 1 9 9" stroke-opacity=".5"/></svg>',
   playlists: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h12M3 12h12M3 18h8"/><path d="M17 18V8l4-1"/><circle cx="15" cy="18" r="2"/></svg>',
   genres: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>',
+  apple: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9a8 8 0 0 1 16 0"/><path d="M7.5 11a4.5 4.5 0 0 1 9 0"/><path d="M11 21v-7l4-1"/><circle cx="9" cy="21" r="2"/></svg>',
   settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
 };
-const TAB_NAME: Record<SideTab, string> = { library: 'Library', albums: 'Albums', playlists: 'Playlists', genres: 'Genres' };
+const TAB_NAME: Record<SideTab, string> = { library: 'Library', albums: 'Albums', playlists: 'Playlists', genres: 'Genres', apple: 'Apple Music' };
 let panelOpen = true;
 let panelLoaded = false;
 let sideQuery = '';
 
 /** The icon rail (Library, Playlists, Genres, Settings) and the searchable panel beside it. */
 export function renderSide() {
-  const tabs: SideTab[] = ['library', 'albums', 'playlists', 'genres'];
+  const tabs: SideTab[] = ['library', 'albums', 'playlists', 'genres', 'apple'];
   $('#rail').innerHTML =
     tabs.map((k) => `<button class="rail-btn" data-st="${k}" aria-pressed="${panelOpen && state.sideTab === k}" title="${TAB_NAME[k]}" aria-label="${TAB_NAME[k]}">${ICONS[k]}</button>`).join('') +
     `<span class="rail-gap"></span><button class="rail-btn" id="openSet" title="Settings" aria-label="Settings">${ICONS.settings}</button>`;
@@ -44,7 +47,7 @@ export function renderSide() {
   tg.title = tg.ariaLabel = panelOpen ? 'Hide the list' : 'Show the list';
   $('#side').hidden = !panelOpen;
   if (!panelOpen) return;
-  const n = (k: string) => state.songs.filter((s) => k === 'all' || s.source === k).length;
+  const n = (k: string) => state.songs.filter((s) => (k === 'all' ? inMainLibrary(s) : k === 'library' ? s.source === 'library' && s.provider === 'local' : s.source === k)).length;
   const v = state.view;
   let rows = '';
   if (state.sideTab === 'library')
@@ -64,6 +67,12 @@ export function renderSide() {
       '<p class="muted small side-empty">No playlists yet.</p>';
   if (state.sideTab === 'genres')
     rows = nav('data-g', 'all', 'All genres', state.songs.length, state.genre === 'all') + genresInUse().map(([k, g]) => nav('data-g', k, g.name, g.n, state.genre === k)).join('');
+  if (state.sideTab === 'apple') {
+    rows = '<p class="muted small side-empty">Loading…</p>';
+    void applePanel().then((html) => {
+      if (state.sideTab === 'apple' && document.getElementById('sideList')) $('#sideList').innerHTML = html;
+    });
+  }
   const add = state.sideTab === 'playlists' ? '<button class="linkbtn" id="plNew">+ New</button>' : '';
   $('#side').innerHTML = `<header class="side-head"><h2>${TAB_NAME[state.sideTab]}</h2>${add}</header>
     <input class="inline-input side-find" id="sideFind" type="search" placeholder="Find ${TAB_NAME[state.sideTab].toLowerCase()}…" value="${esc(sideQuery)}" aria-label="Find in ${TAB_NAME[state.sideTab]}">
@@ -81,6 +90,10 @@ function filterSide() {
 }
 
 export function renderHead() {
+  if (state.view.kind === 'apple') {
+    $('#viewHead').innerHTML = appleHead();
+    return;
+  }
   const list = visible(), v = state.view;
   const p = v.kind === 'pl' ? state.playlists.find((x) => x.id === v.id) : undefined;
   const al = v.kind === 'album' ? albums().find((a) => a.key === v.key) : undefined;
@@ -97,6 +110,7 @@ export function renderHead() {
 export function renderChips() {
   const chips = $('#chips');
   chips.hidden = state.view.kind !== 'ai';
+  $('.bar').hidden = state.view.kind === 'apple';
   if (chips.hidden) return;
   const pool = state.songs.filter((s) => s.source === 'ai');
   const counts: Record<string, number> = { all: pool.length };
@@ -105,8 +119,16 @@ export function renderChips() {
   chips.innerHTML = opts.map(([k, l]) => `<button class="chip" aria-pressed="${state.filter === k}" data-f="${k}">${l}<span class="n">${counts[k] || 0}</span></button>`).join('');
 }
 
+/** Where a song comes from, shown on every card. */
+export function sourceBadge(s: Song) {
+  if (s.provider === 'apple') return '<span class="src src-apple" title="Streams from Apple Music">Apple Music</span>';
+  if (s.source === 'ai') return `<span class="src src-ai" title="Written with ${esc(writerName())}">${esc(writerName())}</span>`;
+  return '<span class="src src-mine" title="A file in your library">Your music</span>';
+}
+
 function cover(s: Song) {
   if (s.art) return `<div class="cover" style="background-image:url('${lt('art', s.art)}')"></div>`;
+  if (s.artUrl) return `<div class="cover" style="background-image:url('${artUrl(s.artUrl)}')"></div>`;
   if (s.source === 'ai' && s.status === 'writing' && !s.lyrics) return `<div class="staff"><div class="placeholder">${esc(writerName())} is writing…</div></div>`;
   if (s.notes.length)
     return `<div class="staff">${staffSVG(toMeasures(s.notes).slice(0, 2), { g: 6.5, W: 300, lyrics: false, timesig: false, chords: s.chords, title: s.title })}</div>`;
@@ -115,6 +137,7 @@ function cover(s: Song) {
 }
 
 export function renderGrid() {
+  if (state.view.kind === 'apple') return void renderAppleGrid();
   const list = visible(), q = state.query.trim();
   const empty = !state.songs.length
     ? state.folders.some((f) => f.managed)
@@ -136,7 +159,7 @@ export function renderGrid() {
         <div class="body">
           <h3>${esc(s.title)}</h3>
           <div class="meta">${sub}</div>
-          <div class="foot">${st ? `<span class="status ${st[1]}">${st[0]}</span>` : ''}<span class="gtag">${esc(s.genre)}</span><span style="margin-right:auto"></span>
+          <div class="foot">${sourceBadge(s)}${st ? `<span class="status ${st[1]}">${st[0]}</span>` : ''}<span class="gtag">${esc(s.genre)}</span><span style="margin-right:auto"></span>
             ${playable(s) ? `<button class="play" data-play="${s.id}" aria-label="Play">${PLAY}</button>` : ''}</div>
         </div></article>`;
         })
@@ -172,6 +195,7 @@ export function initLibrary(actions: { addFolder: () => void; request: () => voi
   });
   $('#side').onclick = async (e) => {
     const t = e.target as HTMLElement;
+    if (state.sideTab === 'apple' && (await handleApplePanelClick(t, actions.settings))) return;
     if (t.id === 'plNew') {
       try {
         const n = state.playlists.length + 1;

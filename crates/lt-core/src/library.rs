@@ -71,6 +71,28 @@ pub struct Song {
     pub stems: i64,
     /// The song's own folder in the library, when it lives in the library folder.
     pub song_dir: Option<String>,
+    /// Where the song plays from: "local" (a file) or a service such as "apple".
+    pub provider: String,
+    /// The service's id for the song (Apple Music catalog id).
+    pub provider_id: Option<String>,
+    /// Artwork from the service, as a URL template.
+    pub art_url: Option<String>,
+}
+
+/// A song from a streaming service, as the interface sends it when saving it to the library.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalSong {
+    pub provider: String,
+    pub provider_id: String,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub genre: String,
+    pub year: String,
+    pub track: Option<i64>,
+    pub duration: Option<f64>,
+    pub art_url: Option<String>,
 }
 
 const SONG_COLS: &str = "s.id, s.source, s.title, s.artist, s.album, s.year, s.genre, s.track, s.duration, \
@@ -78,7 +100,7 @@ const SONG_COLS: &str = "s.id, s.source, s.title, s.artist, s.album, s.year, s.g
     s.art, s.added_at, s.updated_at, s.request, s.status, s.sub_genre, s.song_key, s.bpm, s.style, s.exclude, s.lyrics, \
     s.master_take, s.notes_json, s.chords_json, \
     (s.path IS NOT NULL OR EXISTS (SELECT 1 FROM takes t WHERE t.song_id = s.id)), (SELECT COUNT(*) FROM stems st WHERE st.song_id = s.id), \
-    (SELECT s.song_dir FROM folders f WHERE f.id = s.folder_id AND f.managed = 1)";
+    (SELECT s.song_dir FROM folders f WHERE f.id = s.folder_id AND f.managed = 1), s.provider, s.provider_id, s.art_url";
 
 fn song_from_row(r: &Row) -> rusqlite::Result<Song> {
     let notes: String = r.get(22)?;
@@ -111,6 +133,9 @@ fn song_from_row(r: &Row) -> rusqlite::Result<Song> {
         has_file: r.get(24)?,
         stems: r.get(25)?,
         song_dir: r.get(26)?,
+        provider: r.get(27)?,
+        provider_id: r.get(28)?,
+        art_url: r.get(29)?,
     })
 }
 
@@ -368,6 +393,25 @@ impl Library {
             let _ = std::fs::remove_dir_all(dir);
         }
         Ok(())
+    }
+
+    /// Adds a streaming song to the library; saving the same song twice returns the saved one.
+    pub fn save_external_song(&self, e: &ExternalSong) -> Result<Song> {
+        if !["apple"].contains(&e.provider.as_str()) {
+            bail!("unknown music service {}", e.provider);
+        }
+        let genre = self.ensure_genre(&e.genre, "file")?;
+        let t = now();
+        let id: i64 = {
+            let db = self.db();
+            db.execute(
+                "INSERT INTO songs(source, provider, provider_id, title, artist, album, year, genre, track, duration, art_url, added_at, updated_at) \
+                 VALUES ('library', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11) ON CONFLICT(provider, provider_id) WHERE provider_id IS NOT NULL DO NOTHING",
+                params![e.provider, e.provider_id, e.title, e.artist, e.album, e.year, genre, e.track, e.duration, e.art_url, t],
+            )?;
+            db.query_row("SELECT id FROM songs WHERE provider = ?1 AND provider_id = ?2", params![e.provider, e.provider_id], |r| r.get(0))?
+        };
+        self.song(id)
     }
 
     // ---------- music folders ----------
@@ -1156,6 +1200,22 @@ mod tests {
         assert_eq!(l.song(s.id).unwrap().genre, "Unsorted");
         let rock = l.ensure_genre("rock", "writer").unwrap();
         assert_eq!(rock, "Rock", "existing tags keep their spelling");
+    }
+
+    #[test]
+    fn streaming_songs_save_once() {
+        let (_d, l) = lib();
+        let e = ExternalSong {
+            provider: "apple".into(), provider_id: "1440833098".into(), title: "Song".into(), artist: "Band".into(),
+            album: "Album".into(), genre: "Alternative".into(), year: "2019".into(), track: Some(3), duration: Some(201.0),
+            art_url: Some("https://is1-ssl.mzstatic.com/{w}x{h}bb.jpg".into()),
+        };
+        let a = l.save_external_song(&e).unwrap();
+        let b = l.save_external_song(&e).unwrap();
+        assert_eq!(a.id, b.id);
+        assert_eq!((a.provider.as_str(), a.provider_id.as_deref(), a.has_audio), ("apple", Some("1440833098"), false));
+        assert_eq!(l.songs().unwrap().len(), 1);
+        assert!(l.save_external_song(&ExternalSong { provider: "nope".into(), ..e }).is_err());
     }
 
     #[test]

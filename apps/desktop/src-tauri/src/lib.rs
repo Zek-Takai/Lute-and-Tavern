@@ -1,7 +1,9 @@
 //! Lute & Tavern desktop app: Tauri commands over lt-core, the `lt://` file protocol and the music-folder watcher.
 
 mod log;
+mod musickit;
 mod protocol;
+mod secure;
 mod updates;
 mod watch;
 mod writer;
@@ -295,14 +297,49 @@ pub fn emit_library_changed(app: &tauri::AppHandle) {
     let _ = app.emit("library-changed", ());
 }
 
+/// The main window. Made in code so Apple's sign-in popup (opened by MusicKit) can open as a real
+/// window that talks back to the app; any other popup is refused.
+fn main_window(app: &tauri::App) -> tauri::Result<()> {
+    let handle = app.handle().clone();
+    tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+        .title("Lute & Tavern")
+        .inner_size(1320.0, 860.0)
+        .min_inner_size(900.0, 600.0)
+        .on_new_window(move |url, features| {
+            let apple = url.host_str().is_some_and(|h| h == "apple.com" || h.ends_with(".apple.com"));
+            if !apple {
+                return tauri::webview::NewWindowResponse::Deny;
+            }
+            let label = format!("apple-signin-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
+            match tauri::WebviewWindowBuilder::new(&handle, label, tauri::WebviewUrl::External("about:blank".parse().expect("static url")))
+                .window_features(features)
+                .title("Sign in to Apple Music")
+                .build()
+            {
+                Ok(window) => tauri::webview::NewWindowResponse::Create { window },
+                Err(_) => tauri::webview::NewWindowResponse::Deny,
+            }
+        })
+        .build()?;
+    Ok(())
+}
+
+/// Saves a song from a streaming service (Apple Music) into the library, or returns it if it is there.
+#[tauri::command]
+async fn save_external_song(state: State<'_, AppState>, song: lt_core::library::ExternalSong) -> Res<Song> {
+    blocking(&state, move |l| l.save_external_song(&song)).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updates::Pending::default())
+        .manage(musickit::TokenCache::default())
         .register_asynchronous_uri_scheme_protocol("lt", protocol::handle)
         .setup(|app| {
+            main_window(app)?;
             let dir = app.path().app_data_dir()?;
             log::init(&dir);
             let lib = Arc::new(Library::open(&dir)?);
@@ -360,6 +397,15 @@ pub fn run() {
             writer::request_song,
             writer::rewrite_song,
             log::log_event,
+            secure::secure_get,
+            secure::secure_set,
+            secure::secure_delete,
+            secure::clear_web_data,
+            musickit::musickit_status,
+            musickit::musickit_set_key,
+            musickit::musickit_forget_key,
+            musickit::musickit_token,
+            save_external_song,
             updates::update_info,
             updates::check_update,
             updates::install_update,

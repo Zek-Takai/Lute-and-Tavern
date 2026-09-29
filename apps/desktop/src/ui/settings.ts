@@ -3,6 +3,7 @@ import { audioDir, join } from '@tauri-apps/api/path';
 import { open as pickFolder } from '@tauri-apps/plugin-dialog';
 import { api, errText, type UpdateInfo } from '../api';
 import { applyLineColor, applySkin, LINE_COLORS, SKINS } from '../player';
+import { appleStatus, connectApple, disconnectApple, forgetAppleKey, isConnected, musicKit, setAppleKey, type AppleStatus } from '../apple';
 import { libraryFolder, reload, rerender, saveSetting, state } from '../state';
 import { $, esc, toast } from '../util';
 
@@ -27,6 +28,7 @@ export async function addMusicFolder() {
 }
 
 let updates: UpdateInfo = { canUpdate: false, currentVersion: '', defaultUrl: '' };
+let apple: AppleStatus = { ready: false, builtIn: false, keyId: '', teamId: '' };
 
 const reportText = (r: { added: number; untagged: number }) =>
   `${r.added} song${r.added === 1 ? '' : 's'} added${r.untagged ? `. ${r.untagged} had no genre tag and wait in Unsorted.` : '.'}`;
@@ -77,6 +79,8 @@ export async function addSongsToLibrary(paths: string[]) {
 export async function openSettings(section?: 'writer') {
   state.writer = await api.writerConfig();
   updates = await api.updateInfo();
+  apple = await appleStatus().catch(() => apple);
+  if (apple.ready) await musicKit().catch(() => {});
   render();
   const d = $<HTMLDialogElement>('#set');
   if (!d.open) d.showModal();
@@ -124,6 +128,21 @@ function render() {
         .map((g) => `<li><input class="inline-input" data-rename="${g.id}" value="${esc(g.name)}" aria-label="Tag name"><span class="muted small">${g.songs} song${g.songs === 1 ? '' : 's'}, ${ORIGIN[g.origin] ?? g.origin}</span><button class="btn small" data-del-tag="${g.id}">Delete</button></li>`)
         .join('')}</ul>
       <form class="row" id="tagForm"><input class="inline-input" id="tagNew" placeholder="New tag, e.g. Sea Shanty" style="flex:1"><button class="btn">Add tag</button></form>
+    </section>
+
+    <section class="set-sec">
+      <h3>Apple Music</h3>
+      <p class="muted small">Play Apple Music inside Lute &amp; Tavern with your Apple Music subscription. Your Apple ID sign-in and every key stay in your Mac's Keychain, never in the app's files.</p>
+      ${apple.ready
+        ? `<div class="row">${isConnected() ? '<span class="src src-apple">Connected</span><button class="btn small" id="amOff">Disconnect</button>' : '<button class="btn primary small" id="amOn">Connect Apple Music</button>'}</div>`
+        : '<p class="small">Add a MusicKit key below to turn Apple Music on.</p>'}
+      <label class="row small"><input type="checkbox" id="amShow" ${state.settings.showAppleInLibrary === false ? '' : 'checked'}> Show saved Apple Music songs in my library (they always show in playlists and the Apple Music tab)</label>
+      ${apple.builtIn ? '' : `<details ${apple.ready ? '' : 'open'}><summary class="small">MusicKit key (for people building the app themselves)</summary>
+        <p class="muted small">From developer.apple.com: a Media ID with MusicKit, then a key with Media Services. The .p8 file is read once into the Keychain.</p>
+        <div class="form"><label for="amKeyId">Key ID</label><input id="amKeyId" value="${esc(apple.keyId)}" placeholder="10 characters">
+          <label for="amTeam">Team ID</label><input id="amTeam" value="${esc(apple.teamId)}" placeholder="10 characters"></div>
+        <div class="row"><button class="btn small" id="amKey">Choose the .p8 key file…</button>${apple.ready ? '<button class="btn small" id="amForget">Remove key</button>' : ''}<span class="muted small" id="amStatus"></span></div>
+      </details>`}
     </section>
 
     <section class="set-sec">
@@ -241,6 +260,25 @@ function render() {
       toast(errText(err));
     }
   };
+  const amStatus = (t: string) => { const el = document.getElementById('amStatus'); if (el) el.textContent = t; };
+  document.getElementById('amOn')?.addEventListener('click', async () => {
+    try { await connectApple(); toast('Apple Music connected'); } catch (e) { toast(`Apple Music: ${errText(e)}`); }
+    render();
+  });
+  document.getElementById('amOff')?.addEventListener('click', async () => { await disconnectApple().catch(() => {}); render(); rerender(); });
+  $('#amShow').onchange = async (e) => { await saveSetting('showAppleInLibrary', (e.target as HTMLInputElement).checked); rerender(); };
+  document.getElementById('amKey')?.addEventListener('click', async () => {
+    const path = await pickFolder({ multiple: false, directory: false, filters: [{ name: 'MusicKit key', extensions: ['p8'] }] });
+    if (typeof path !== 'string') return;
+    try {
+      await setAppleKey(path, $<HTMLInputElement>('#amKeyId').value, $<HTMLInputElement>('#amTeam').value);
+      apple = await appleStatus();
+      toast('MusicKit key saved in your Keychain');
+      render();
+      rerender();
+    } catch (e) { amStatus(errText(e)); }
+  });
+  document.getElementById('amForget')?.addEventListener('click', async () => { await forgetAppleKey(); apple = await appleStatus(); render(); });
   $('#uAuto').onchange = (e) => void saveSetting('autoUpdate', (e.target as HTMLInputElement).checked);
   $('#uUrl').onchange = (e) => void saveSetting('updateUrl', (e.target as HTMLInputElement).value.trim());
   $('#uCheck').onclick = async () => {

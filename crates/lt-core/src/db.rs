@@ -124,6 +124,13 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE songs ADD COLUMN song_dir TEXT;
     CREATE INDEX songs_song_dir ON songs(song_dir);
     "#,
+    // v5: songs that stream from a service (Apple Music) instead of a file.
+    r#"
+    ALTER TABLE songs ADD COLUMN provider TEXT NOT NULL DEFAULT 'local';
+    ALTER TABLE songs ADD COLUMN provider_id TEXT;
+    ALTER TABLE songs ADD COLUMN art_url TEXT;
+    CREATE UNIQUE INDEX songs_provider_id ON songs(provider, provider_id) WHERE provider_id IS NOT NULL;
+    "#,
 ];
 
 pub fn open(path: &std::path::Path) -> Result<Connection> {

@@ -5,7 +5,7 @@ import { keyName } from '../music/notation';
 import { pickStems, playing, playSong, playStems, playTake, setStemMix, stemMix, stop, syncIcons } from '../player';
 import { byId, playable, reload, rerender, state, visible, writerName } from '../state';
 import { $, copyText, date, esc, PLAY, toast } from '../util';
-import { STATUS } from './library';
+import { sourceBadge, STATUS } from './library';
 import { renderSheet, resetSheet } from './sheet';
 
 export let cur: SongDetail | null = null;
@@ -49,7 +49,7 @@ function renderHeader() {
   mp.hidden = !playable(s);
   const m: string[] = [];
   if (s.source === 'ai' && s.status) m.push(`<span class="status ${STATUS[s.status][1]}">${STATUS[s.status][0]}</span>`);
-  m.push(`<span class="gtag">${esc(s.genre)}</span>`);
+  m.push(sourceBadge(s), `<span class="gtag">${esc(s.genre)}</span>`);
   if (s.source === 'ai' && s.lyrics)
     m.push(...[s.subGenre, keyName(s.key), s.bpm ? `${s.bpm} BPM` : '', `Written by ${s.artist}`].filter(Boolean).map((v) => `<span class="meta">${esc(v)}</span>`));
   if (s.source === 'library') m.push(...[s.artist, s.album, s.year].filter(Boolean).map((v) => `<span class="meta">${esc(v)}</span>`));

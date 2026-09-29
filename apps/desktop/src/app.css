@@ -103,3 +103,11 @@ nav.rail { position: sticky; top: 16px; display: flex; flex-direction: column; a
 .album-row .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .album-row small { color: var(--ink-2); font-size: 12px; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .player[data-skin="minimal"] .tog[aria-pressed="true"], .player[data-skin="minimal"] .tog[aria-expanded="true"] { color: var(--accent); background: var(--accent-soft); }
+
+/* ---------- where a song comes from ---------- */
+.src { font-size: 11.5px; font-weight: 600; border-radius: 999px; padding: 2px 8px; white-space: nowrap; border: 1px solid var(--line); color: var(--ink-2); }
+.src-apple { color: #ff8fa3; border-color: rgba(255,143,163,.4); background: rgba(250,45,72,.12); }
+.src-ai { color: var(--accent); border-color: rgba(154,166,255,.4); background: var(--accent-soft); }
+.src-mine { color: #7fd8b0; border-color: rgba(127,216,176,.35); background: rgba(127,216,176,.1); }
+.side-sub { font: 600 12px/1 var(--body); color: var(--ink-2); margin: 12px 10px 4px; }
+.grid-sub { grid-column: 1 / -1; font: 700 18px/1.2 var(--display); margin: 12px 0 0; }
