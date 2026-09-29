@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-art"
+description = "Enables the set_art command without any pre-configured scope."
+commands.allow = ["set_art"]
+
+[[permission]]
+identifier = "deny-set-art"
+description = "Denies the set_art command without any pre-configured scope."
+commands.deny = ["set_art"]

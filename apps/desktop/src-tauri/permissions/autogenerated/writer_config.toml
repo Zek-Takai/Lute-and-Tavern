@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-writer-config"
+description = "Enables the writer_config command without any pre-configured scope."
+commands.allow = ["writer_config"]
+
+[[permission]]
+identifier = "deny-writer-config"
+description = "Denies the writer_config command without any pre-configured scope."
+commands.deny = ["writer_config"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-delete-genre"
+description = "Enables the delete_genre command without any pre-configured scope."
+commands.allow = ["delete_genre"]
+
+[[permission]]
+identifier = "deny-delete-genre"
+description = "Denies the delete_genre command without any pre-configured scope."
+commands.deny = ["delete_genre"]

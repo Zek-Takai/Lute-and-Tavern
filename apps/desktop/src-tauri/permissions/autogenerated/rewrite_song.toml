@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rewrite-song"
+description = "Enables the rewrite_song command without any pre-configured scope."
+commands.allow = ["rewrite_song"]
+
+[[permission]]
+identifier = "deny-rewrite-song"
+description = "Denies the rewrite_song command without any pre-configured scope."
+commands.deny = ["rewrite_song"]

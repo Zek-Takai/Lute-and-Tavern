@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-add-sheet"
+description = "Enables the add_sheet command without any pre-configured scope."
+commands.allow = ["add_sheet"]
+
+[[permission]]
+identifier = "deny-add-sheet"
+description = "Denies the add_sheet command without any pre-configured scope."
+commands.deny = ["add_sheet"]

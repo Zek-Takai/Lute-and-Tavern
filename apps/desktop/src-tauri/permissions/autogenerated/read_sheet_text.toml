@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-read-sheet-text"
+description = "Enables the read_sheet_text command without any pre-configured scope."
+commands.allow = ["read_sheet_text"]
+
+[[permission]]
+identifier = "deny-read-sheet-text"
+description = "Denies the read_sheet_text command without any pre-configured scope."
+commands.deny = ["read_sheet_text"]

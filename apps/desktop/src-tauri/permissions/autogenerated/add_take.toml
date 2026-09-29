@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-add-take"
+description = "Enables the add_take command without any pre-configured scope."
+commands.allow = ["add_take"]
+
+[[permission]]
+identifier = "deny-add-take"
+description = "Denies the add_take command without any pre-configured scope."
+commands.deny = ["add_take"]

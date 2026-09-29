@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rename-genre"
+description = "Enables the rename_genre command without any pre-configured scope."
+commands.allow = ["rename_genre"]
+
+[[permission]]
+identifier = "deny-rename-genre"
+description = "Denies the rename_genre command without any pre-configured scope."
+commands.deny = ["rename_genre"]

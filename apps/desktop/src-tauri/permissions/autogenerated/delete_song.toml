@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-delete-song"
+description = "Enables the delete_song command without any pre-configured scope."
+commands.allow = ["delete_song"]
+
+[[permission]]
+identifier = "deny-delete-song"
+description = "Denies the delete_song command without any pre-configured scope."
+commands.deny = ["delete_song"]

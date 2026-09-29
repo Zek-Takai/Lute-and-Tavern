@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-genre"
+description = "Enables the create_genre command without any pre-configured scope."
+commands.allow = ["create_genre"]
+
+[[permission]]
+identifier = "deny-create-genre"
+description = "Denies the create_genre command without any pre-configured scope."
+commands.deny = ["create_genre"]

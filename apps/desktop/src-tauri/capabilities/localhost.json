@@ -13,6 +13,7 @@
   },
   "permissions": [
     "core:default",
-    "dialog:default"
+    "dialog:default",
+    "app-commands"
   ]
 }

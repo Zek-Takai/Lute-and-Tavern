@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-toggle-in-playlist"
+description = "Enables the toggle_in_playlist command without any pre-configured scope."
+commands.allow = ["toggle_in_playlist"]
+
+[[permission]]
+identifier = "deny-toggle-in-playlist"
+description = "Denies the toggle_in_playlist command without any pre-configured scope."
+commands.deny = ["toggle_in_playlist"]
