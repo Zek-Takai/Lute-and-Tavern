@@ -55,9 +55,11 @@ pub async fn set_writer_config(
 ) -> Result<(), String> {
     let l = &state.lib;
     let name = if name.trim().is_empty() { DEFAULT_NAME.to_string() } else { name.trim().to_string() };
-    for (k, v) in [("writerBaseUrl", base_url.trim().to_string()), ("writerModel", model.trim().to_string()), ("writerName", name)] {
+    let old_name = config(&state).name;
+    for (k, v) in [("writerBaseUrl", base_url.trim().to_string()), ("writerModel", model.trim().to_string()), ("writerName", name.clone())] {
         l.set_setting(k, &serde_json::Value::String(v)).map_err(|e| e.to_string())?;
     }
+    l.rename_writer(&old_name, &name).map_err(|e| e.to_string())?;
     if let Some(key) = api_key {
         let entry = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_USER).map_err(|e| format!("The system keychain is not available: {e}"))?;
         if key.trim().is_empty() {

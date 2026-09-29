@@ -961,6 +961,25 @@ impl Library {
         self.song(id)
     }
 
+    /// Moves the songwriter's credit to a new name on every song still credited to the old one.
+    /// Songs whose artist the person changed by hand are left alone. Returns how many changed.
+    pub fn rename_writer(&self, old: &str, new: &str) -> Result<usize> {
+        if old == new {
+            return Ok(0);
+        }
+        let ids: Vec<i64> = {
+            let db = self.db();
+            let mut st = db.prepare("SELECT id FROM songs WHERE source = 'ai' AND artist = ?1")?;
+            let ids = st.query_map([old], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+            db.execute("UPDATE songs SET artist = ?2, updated_at = ?3 WHERE source = 'ai' AND artist = ?1", params![old, new, now()])?;
+            ids
+        };
+        for &id in &ids {
+            self.write_sidecar(id)?;
+        }
+        Ok(ids.len())
+    }
+
     /// Stores a draft or rewrite from the songwriter and records it as a new version.
     pub fn apply_draft(&self, id: i64, d: &Draft, note: &str, keep_genre: bool) -> Result<Song> {
         let t = now();
@@ -1170,6 +1189,17 @@ mod tests {
         assert_eq!(l.song_detail(b.id).unwrap().playlists, vec![p.id]);
         assert_eq!(a.genre, "Folk");
         assert_eq!(b.genre, "Unsorted");
+    }
+
+    #[test]
+    fn renaming_the_writer_moves_its_credit() {
+        let (_d, l) = lib();
+        let a = l.create_request("a folk song", None, "Bard").unwrap();
+        let b = l.create_request("a rock song", None, "Bard").unwrap();
+        l.update_song(b.id, &SongPatch { artist: Some("Me".into()), ..Default::default() }).unwrap();
+        assert_eq!(l.rename_writer("Bard", "Ari").unwrap(), 1);
+        assert_eq!(l.song(a.id).unwrap().artist, "Ari");
+        assert_eq!(l.song(b.id).unwrap().artist, "Me", "a hand-set artist stays");
     }
 
     #[test]

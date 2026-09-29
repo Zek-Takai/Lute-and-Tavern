@@ -190,6 +190,7 @@ function render() {
     try {
       await api.setWriterConfig($<HTMLInputElement>('#wUrl').value, $<HTMLInputElement>('#wModel').value, $<HTMLInputElement>('#wName').value, key ? key : null);
       state.writer = await api.writerConfig();
+      await reload();
       rerender();
       render();
       toast('Songwriter saved');
