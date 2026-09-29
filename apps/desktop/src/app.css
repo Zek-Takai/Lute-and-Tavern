@@ -1,4 +1,6 @@
 /* Desktop-app additions on top of the mockup styles. */
+/* The mockup's host page supplied this; without it, components with their own display rule ignore `hidden`. */
+[hidden] { display: none !important; }
 body { padding-block: 0 110px; user-select: none; -webkit-user-select: none; }
 input, textarea, pre, .field pre, .msg, .ask { user-select: text; -webkit-user-select: text; }
 .brand .logo { width: 40px; height: 40px; flex: none; }

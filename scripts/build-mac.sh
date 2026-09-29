@@ -9,6 +9,7 @@
 #   scripts/build-mac.sh            signs with your Developer ID Application certificate if you have one,
 #                                   otherwise with your Apple Development certificate
 #   LT_SIGN_IDENTITY="..." scripts/build-mac.sh    signs with the exact certificate you name
+#   scripts/build-mac.sh --local    signs but skips notarization: fastest way to try a build on this Mac
 set -euo pipefail
 cd "${0:A:h}/../apps/desktop"
 
@@ -30,14 +31,18 @@ identity=${chosen#* }
 print "Signing with: $identity ($hash)"
 
 [[ -d node_modules ]] || npm install --no-fund --no-audit
-APPLE_SIGNING_IDENTITY="$hash" npm run tauri build -- --bundles app,dmg
+bundles=app,dmg
+[[ "${1:-}" == "--local" ]] && bundles=app
+APPLE_SIGNING_IDENTITY="$hash" npm run tauri build -- --bundles "$bundles"
 
 app="../../target/release/bundle/macos/Lute & Tavern.app"
 codesign --verify --deep --strict "$app"
-dmg=$(ls -t ../../target/release/bundle/dmg/*.dmg | head -1)
+dmg=$(ls -t ../../target/release/bundle/dmg/*.dmg 2>/dev/null | head -1 || true)
 
 profile="${LT_NOTARY_PROFILE:-lute-and-tavern}"
-if [[ "$identity" == "Developer ID Application:"* ]]; then
+if [[ "${1:-}" == "--local" ]]; then
+  print "\nSkipped notarization (--local). This build opens on this Mac; share only notarized builds."
+elif [[ "$identity" == "Developer ID Application:"* ]]; then
   if xcrun notarytool history --keychain-profile "$profile" >/dev/null 2>&1; then
     print "Sending the disk image to Apple for notarization (usually a few minutes)..."
     xcrun notarytool submit "$dmg" --keychain-profile "$profile" --wait
@@ -51,5 +56,5 @@ if [[ "$identity" == "Developer ID Application:"* ]]; then
   fi
 fi
 print "\nDone. The app is in: $(cd "${app:h}" && pwd)/${app:t}"
-print "The installer disk image is in: $(cd ../../target/release/bundle/dmg && pwd)"
+[[ -n "$dmg" && "${1:-}" != "--local" ]] && print "The installer disk image is in: $(cd ../../target/release/bundle/dmg && pwd)"
 open -R "$app"
