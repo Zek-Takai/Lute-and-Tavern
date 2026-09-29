@@ -141,12 +141,11 @@ async function boot() {
   onRender(renderAll);
   initPlayer();
   initQueue();
-  initLibrary({ addFolder: () => void addMusicFolder(), request: () => void openRequest(), setupLibrary: (suggested: boolean) => void chooseLibrary(suggested) });
+  initLibrary({ addFolder: () => void addMusicFolder(), request: () => void openRequest(), setupLibrary: (suggested: boolean) => void chooseLibrary(suggested), settings: () => void openSettings() });
   initSong();
   initSheetKeys(() => $<HTMLDialogElement>('#dlg').open && activeTab() === 'sheet');
   initRequest();
   initImport();
-  $('#openSet').onclick = () => void openSettings();
   $('#pBtn').onclick = () => togglePlay(visible());
   $('#pNext').onclick = () => step(1);
   $('#pPrev').onclick = () => step(-1);

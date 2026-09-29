@@ -16,25 +16,52 @@ export const STATUS: Record<string, [string, string]> = {
 const nav = (attr: string, val: string | number, label: string, count: number, on: boolean) =>
   `<button class="nav" ${attr}="${esc(val)}" aria-pressed="${on}"><span>${esc(label)}</span><span class="n">${count}</span></button>`;
 
+const ICONS: Record<SideTab | 'settings', string> = {
+  library: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+  playlists: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h12M3 12h12M3 18h8"/><path d="M17 18V8l4-1"/><circle cx="15" cy="18" r="2"/></svg>',
+  genres: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>',
+  settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+};
+const TAB_NAME: Record<SideTab, string> = { library: 'Library', playlists: 'Playlists', genres: 'Genres' };
+let panelOpen = true;
+let sideQuery = '';
+
+/** The icon rail (Library, Playlists, Genres, Settings) and the searchable panel beside it. */
 export function renderSide() {
+  const tabs: SideTab[] = ['library', 'playlists', 'genres'];
+  $('#rail').innerHTML =
+    tabs.map((k) => `<button class="rail-btn" data-st="${k}" aria-pressed="${panelOpen && state.sideTab === k}" title="${TAB_NAME[k]}" aria-label="${TAB_NAME[k]}">${ICONS[k]}</button>`).join('') +
+    `<span class="rail-gap"></span><button class="rail-btn" id="openSet" title="Settings" aria-label="Settings">${ICONS.settings}</button>`;
+  $('#layout').classList.toggle('panel-closed', !panelOpen);
+  $('#side').hidden = !panelOpen;
+  if (!panelOpen) return;
   const n = (k: string) => state.songs.filter((s) => k === 'all' || s.source === k).length;
   const v = state.view;
-  let body = '';
+  let rows = '';
   if (state.sideTab === 'library')
-    body =
+    rows =
       nav('data-view', 'all', 'All music', n('all'), v.kind === 'all') +
       nav('data-view', 'ai', `Written with ${writerName()}`, n('ai'), v.kind === 'ai') +
       nav('data-view', 'library', 'My music', n('library'), v.kind === 'library');
   if (state.sideTab === 'playlists')
-    body =
-      state.playlists.map((p) => nav('data-view', 'pl:' + p.id, p.name, p.songs.length, v.kind === 'pl' && v.id === p.id)).join('') +
-      '<button class="nav add" id="plNew">+ New playlist</button>';
+    rows = state.playlists.map((p) => nav('data-view', 'pl:' + p.id, p.name, p.songs.length, v.kind === 'pl' && v.id === p.id)).join('') ||
+      '<p class="muted small side-empty">No playlists yet.</p>';
   if (state.sideTab === 'genres')
-    body = nav('data-g', 'all', 'All genres', state.songs.length, state.genre === 'all') + genresInUse().map(([k, g]) => nav('data-g', k, g.name, g.n, state.genre === k)).join('');
-  const tabs: [SideTab, string][] = [['library', 'Library'], ['playlists', 'Playlists'], ['genres', 'Genres']];
-  $('#side').innerHTML =
-    `<div class="seg side-seg" role="tablist" aria-label="Sidebar">${tabs.map(([k, l]) => `<button role="tab" data-st="${k}" aria-pressed="${state.sideTab === k}" aria-selected="${state.sideTab === k}">${l}</button>`).join('')}</div><section>${body}</section>`;
+    rows = nav('data-g', 'all', 'All genres', state.songs.length, state.genre === 'all') + genresInUse().map(([k, g]) => nav('data-g', k, g.name, g.n, state.genre === k)).join('');
+  const add = state.sideTab === 'playlists' ? '<button class="linkbtn" id="plNew">+ New</button>' : '';
+  $('#side').innerHTML = `<header class="side-head"><h2>${TAB_NAME[state.sideTab]}</h2>${add}</header>
+    <input class="inline-input side-find" id="sideFind" type="search" placeholder="Find ${TAB_NAME[state.sideTab].toLowerCase()}…" value="${esc(sideQuery)}" aria-label="Find in ${TAB_NAME[state.sideTab]}">
+    <section class="side-list" id="sideList">${rows}</section>`;
+  filterSide();
   $('#genreList').innerHTML = state.genres.map((g) => `<option value="${esc(g.name)}">`).join('');
+}
+
+/** Hides rows that don't match the panel's search box, without redrawing (keeps typing smooth). */
+function filterSide() {
+  const q = sideQuery.trim().toLowerCase();
+  document.querySelectorAll<HTMLElement>('#sideList .nav').forEach((row) => {
+    row.hidden = !!q && !row.textContent!.toLowerCase().includes(q);
+  });
 }
 
 export function renderHead() {
@@ -99,14 +126,27 @@ export function renderGrid() {
   syncIcons();
 }
 
-export function initLibrary(actions: { addFolder: () => void; request: () => void; setupLibrary: (suggested: boolean) => void }) {
+export function initLibrary(actions: { addFolder: () => void; request: () => void; setupLibrary: (suggested: boolean) => void; settings: () => void }) {
+  $('#rail').onclick = (e) => {
+    const t = e.target as HTMLElement;
+    if (t.closest('#openSet')) return actions.settings();
+    const tab = t.closest<HTMLElement>('[data-st]');
+    if (!tab) return;
+    const k = tab.dataset.st as SideTab;
+    // Clicking the open tab again folds the panel away for more room.
+    panelOpen = !(panelOpen && state.sideTab === k);
+    state.sideTab = k;
+    if (panelOpen) sideQuery = '';
+    renderSide();
+    if (panelOpen) $('#sideFind')?.focus();
+  };
+  $('#side').addEventListener('input', (e) => {
+    if ((e.target as HTMLElement).id !== 'sideFind') return;
+    sideQuery = (e.target as HTMLInputElement).value;
+    filterSide();
+  });
   $('#side').onclick = async (e) => {
     const t = e.target as HTMLElement;
-    const tab = t.closest<HTMLElement>('[data-st]');
-    if (tab) {
-      state.sideTab = tab.dataset.st as SideTab;
-      return renderSide();
-    }
     if (t.id === 'plNew') {
       try {
         const n = state.playlists.length + 1;

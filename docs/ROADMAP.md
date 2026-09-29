@@ -20,3 +20,11 @@
 - Local music generation: render a songwriter song to audio on your own machine (open models such as ACE-Step), landing as a take
 - Lyrics view with timing while a song plays
 - Edit file tags in place (write back to the audio file), with a clear opt-in
+
+## To discuss before building
+- **YouTube songs** (a friend's idea): save YouTube / YouTube Music links as songs and play them in the app.
+  Allowed only through YouTube's embedded player, which must stay visible (at least 200x200 px); audio-only or
+  background playback and pulling the audio stream are against YouTube's API terms. So YouTube songs would have
+  no visualizer reaction, no stems, no offline play, and ads without Premium. Desktop apps built like this one
+  hit YouTube's "Error 153" (no web referrer), which needs a small relay page on a real website (Cloudflare).
+  Sources: developers.google.com/youtube/terms/developer-policies, tauri-apps/tauri issue 14422.
