@@ -9,15 +9,18 @@
 //! ```
 
 use crate::{db, genre, tags};
-use anyhow::{anyhow, bail, Context, Result};
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use anyhow::{Context, Result, anyhow, bail};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn now() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Clone)]
@@ -30,7 +33,12 @@ pub struct DataDirs {
 
 impl DataDirs {
     pub fn new(root: &Path) -> Result<Self> {
-        let d = Self { root: root.into(), art: root.join("art"), sheets: root.join("sheets"), takes: root.join("takes") };
+        let d = Self {
+            root: root.into(),
+            art: root.join("art"),
+            sheets: root.join("sheets"),
+            takes: root.join("takes"),
+        };
         for p in [&d.root, &d.art, &d.sheets, &d.takes] {
             std::fs::create_dir_all(p).with_context(|| format!("creating {}", p.display()))?;
         }
@@ -266,7 +274,10 @@ impl Library {
     pub fn open(data_dir: &Path) -> Result<Self> {
         let dirs = DataDirs::new(data_dir)?;
         let conn = db::open(&dirs.root.join("library.db"))?;
-        Ok(Self { conn: Mutex::new(conn), dirs })
+        Ok(Self {
+            conn: Mutex::new(conn),
+            dirs,
+        })
     }
 
     pub(crate) fn db(&self) -> MutexGuard<'_, Connection> {
@@ -277,16 +288,24 @@ impl Library {
 
     pub fn songs(&self) -> Result<Vec<Song>> {
         let db = self.db();
-        let mut st = db.prepare(&format!("SELECT {SONG_COLS} FROM songs s ORDER BY s.added_at DESC, s.id DESC"))?;
-        let rows = st.query_map([], song_from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut st = db.prepare(&format!(
+            "SELECT {SONG_COLS} FROM songs s ORDER BY s.added_at DESC, s.id DESC"
+        ))?;
+        let rows = st
+            .query_map([], song_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
 
     pub fn song(&self, id: i64) -> Result<Song> {
         let db = self.db();
-        db.query_row(&format!("SELECT {SONG_COLS} FROM songs s WHERE s.id = ?1"), [id], song_from_row)
-            .optional()?
-            .ok_or_else(|| anyhow!("song {id} not found"))
+        db.query_row(
+            &format!("SELECT {SONG_COLS} FROM songs s WHERE s.id = ?1"),
+            [id],
+            song_from_row,
+        )
+        .optional()?
+        .ok_or_else(|| anyhow!("song {id} not found"))
     }
 
     pub fn song_detail(&self, id: i64) -> Result<SongDetail> {
@@ -294,7 +313,14 @@ impl Library {
         let db = self.db();
         let takes = db
             .prepare("SELECT id, name, origin, added_at FROM takes WHERE song_id = ?1 ORDER BY id")?
-            .query_map([id], |r| Ok(Take { id: r.get(0)?, name: r.get(1)?, origin: r.get(2)?, added_at: r.get(3)? }))?
+            .query_map([id], |r| {
+                Ok(Take {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    origin: r.get(2)?,
+                    added_at: r.get(3)?,
+                })
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let versions = db
             .prepare("SELECT id, label, note, created_at FROM versions WHERE song_id = ?1 ORDER BY id DESC")?
@@ -302,11 +328,24 @@ impl Library {
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let messages = db
             .prepare("SELECT role, text, created_at FROM messages WHERE song_id = ?1 ORDER BY id")?
-            .query_map([id], |r| Ok(Message { role: r.get(0)?, text: r.get(1)?, created_at: r.get(2)? }))?
+            .query_map([id], |r| {
+                Ok(Message {
+                    role: r.get(0)?,
+                    text: r.get(1)?,
+                    created_at: r.get(2)?,
+                })
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let sheets = db
             .prepare("SELECT id, name, kind, added_at FROM sheets WHERE song_id = ?1 ORDER BY id")?
-            .query_map([id], |r| Ok(Sheet { id: r.get(0)?, name: r.get(1)?, kind: r.get(2)?, added_at: r.get(3)? }))?
+            .query_map([id], |r| {
+                Ok(Sheet {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    kind: r.get(2)?,
+                    added_at: r.get(3)?,
+                })
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let playlists = db
             .prepare("SELECT playlist_id FROM playlist_songs WHERE song_id = ?1")?
@@ -320,7 +359,15 @@ impl Library {
                 Ok(Stem { id: r.get(0)?, name: r.get(1)?, format })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(SongDetail { song, takes, versions, messages, sheets, playlists, stem_files })
+        Ok(SongDetail {
+            song,
+            takes,
+            versions,
+            messages,
+            sheets,
+            playlists,
+            stem_files,
+        })
     }
 
     pub fn update_song(&self, id: i64, p: &SongPatch) -> Result<Song> {
@@ -329,17 +376,30 @@ impl Library {
             let t = now();
             if let Some(v) = &p.title {
                 let v = v.trim();
-                db.execute("UPDATE songs SET title = ?2, updated_at = ?3 WHERE id = ?1", params![id, if v.is_empty() { "Untitled" } else { v }, t])?;
+                db.execute(
+                    "UPDATE songs SET title = ?2, updated_at = ?3 WHERE id = ?1",
+                    params![id, if v.is_empty() { "Untitled" } else { v }, t],
+                )?;
             }
-            for (col, val) in [("artist", &p.artist), ("album", &p.album), ("year", &p.year)] {
+            for (col, val) in [
+                ("artist", &p.artist),
+                ("album", &p.album),
+                ("year", &p.year),
+            ] {
                 if let Some(v) = val {
-                    db.execute(&format!("UPDATE songs SET {col} = ?2, updated_at = ?3 WHERE id = ?1"), params![id, v.trim(), t])?;
+                    db.execute(
+                        &format!("UPDATE songs SET {col} = ?2, updated_at = ?3 WHERE id = ?1"),
+                        params![id, v.trim(), t],
+                    )?;
                 }
             }
         }
         if let Some(g) = &p.genre {
             let name = self.ensure_genre(g, "user")?;
-            self.db().execute("UPDATE songs SET genre = ?2, updated_at = ?3 WHERE id = ?1", params![id, name, now()])?;
+            self.db().execute(
+                "UPDATE songs SET genre = ?2, updated_at = ?3 WHERE id = ?1",
+                params![id, name, now()],
+            )?;
         }
         if p.title.is_some() || p.artist.is_some() {
             self.relocate(id)?;
@@ -352,15 +412,25 @@ impl Library {
     /// Copies an image into the art folder and attaches it to the song.
     pub fn set_art_from_file(&self, id: i64, src: &Path) -> Result<Song> {
         let bytes = std::fs::read(src).with_context(|| format!("reading {}", src.display()))?;
-        let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("jpg").to_ascii_lowercase();
+        let ext = src
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("jpg")
+            .to_ascii_lowercase();
         let name = self.store_art(&bytes, &ext)?;
-        self.db().execute("UPDATE songs SET art = ?2, updated_at = ?3 WHERE id = ?1", params![id, name, now()])?;
+        self.db().execute(
+            "UPDATE songs SET art = ?2, updated_at = ?3 WHERE id = ?1",
+            params![id, name, now()],
+        )?;
         self.write_cover(id)?;
         self.song(id)
     }
 
     pub fn clear_art(&self, id: i64) -> Result<Song> {
-        self.db().execute("UPDATE songs SET art = NULL, updated_at = ?2 WHERE id = ?1", params![id, now()])?;
+        self.db().execute(
+            "UPDATE songs SET art = NULL, updated_at = ?2 WHERE id = ?1",
+            params![id, now()],
+        )?;
         self.song(id)
     }
 
@@ -373,7 +443,12 @@ impl Library {
         Ok(name)
     }
 
-    pub fn save_sheet_music(&self, id: i64, notes: &serde_json::Value, chords: &[String]) -> Result<()> {
+    pub fn save_sheet_music(
+        &self,
+        id: i64,
+        notes: &serde_json::Value,
+        chords: &[String],
+    ) -> Result<()> {
         self.db().execute(
             "UPDATE songs SET notes_json = ?2, chords_json = ?3, updated_at = ?4 WHERE id = ?1",
             params![id, notes.to_string(), serde_json::to_string(chords)?, now()],
@@ -384,12 +459,21 @@ impl Library {
     /// Removes a song from the library. Music files on disk are never touched;
     /// files the app copied for the song (takes, sheets) are removed with it.
     pub fn delete_song(&self, id: i64) -> Result<()> {
-        let (dir, folder_id): (Option<String>, Option<i64>) = self.db().query_row("SELECT song_dir, folder_id FROM songs WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let (dir, folder_id): (Option<String>, Option<i64>) = self.db().query_row(
+            "SELECT song_dir, folder_id FROM songs WHERE id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
         if let (Some(dir), Some(_)) = (dir, self.managed_root(folder_id)) {
-            bail!("This song lives in your library folder. To remove it, move its folder out of the library or to the Trash:\n{dir}");
+            bail!(
+                "This song lives in your library folder. To remove it, move its folder out of the library or to the Trash:\n{dir}"
+            );
         }
         self.db().execute("DELETE FROM songs WHERE id = ?1", [id])?;
-        for dir in [self.dirs.takes.join(id.to_string()), self.dirs.sheets.join(id.to_string())] {
+        for dir in [
+            self.dirs.takes.join(id.to_string()),
+            self.dirs.sheets.join(id.to_string()),
+        ] {
             let _ = std::fs::remove_dir_all(dir);
         }
         Ok(())
@@ -409,7 +493,11 @@ impl Library {
                  VALUES ('library', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11) ON CONFLICT(provider, provider_id) WHERE provider_id IS NOT NULL DO NOTHING",
                 params![e.provider, e.provider_id, e.title, e.artist, e.album, e.year, genre, e.track, e.duration, e.art_url, t],
             )?;
-            db.query_row("SELECT id FROM songs WHERE provider = ?1 AND provider_id = ?2", params![e.provider, e.provider_id], |r| r.get(0))?
+            db.query_row(
+                "SELECT id FROM songs WHERE provider = ?1 AND provider_id = ?2",
+                params![e.provider, e.provider_id],
+                |r| r.get(0),
+            )?
         };
         self.song(id)
     }
@@ -420,26 +508,43 @@ impl Library {
         let db = self.db();
         let rows = db
             .prepare("SELECT id, path, managed FROM folders ORDER BY managed DESC, path")?
-            .query_map([], |r| Ok(Folder { id: r.get(0)?, path: r.get(1)?, managed: r.get(2)? }))?
+            .query_map([], |r| {
+                Ok(Folder {
+                    id: r.get(0)?,
+                    path: r.get(1)?,
+                    managed: r.get(2)?,
+                })
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
 
     pub fn add_folder(&self, path: &Path) -> Result<Folder> {
-        let path = path.canonicalize().with_context(|| format!("opening {}", path.display()))?;
+        let path = path
+            .canonicalize()
+            .with_context(|| format!("opening {}", path.display()))?;
         if !path.is_dir() {
             bail!("{} is not a folder", path.display());
         }
         let p = path.to_string_lossy().to_string();
         let db = self.db();
         db.execute("INSERT OR IGNORE INTO folders(path) VALUES (?1)", [&p])?;
-        let (id, managed) = db.query_row("SELECT id, managed FROM folders WHERE path = ?1", [&p], |r| Ok((r.get(0)?, r.get(1)?)))?;
-        Ok(Folder { id, path: p, managed })
+        let (id, managed) = db.query_row(
+            "SELECT id, managed FROM folders WHERE path = ?1",
+            [&p],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        Ok(Folder {
+            id,
+            path: p,
+            managed,
+        })
     }
 
     /// Stops watching a folder and removes its songs from the library (files stay on disk).
     pub fn remove_folder(&self, id: i64) -> Result<()> {
-        self.db().execute("DELETE FROM folders WHERE id = ?1", [id])?;
+        self.db()
+            .execute("DELETE FROM folders WHERE id = ?1", [id])?;
         Ok(())
     }
 
@@ -453,8 +558,15 @@ impl Library {
             .follow_links(true)
             .into_iter()
             .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_file() && tags::is_audio(e.path()) && !is_hidden(e.path().strip_prefix(&root).unwrap_or(e.path())))
-            .filter(|e| !folder.managed || crate::organize::place_of(&root, e.path()) != crate::organize::Place::Extra)
+            .filter(|e| {
+                e.file_type().is_file()
+                    && tags::is_audio(e.path())
+                    && !is_hidden(e.path().strip_prefix(&root).unwrap_or(e.path()))
+            })
+            .filter(|e| {
+                !folder.managed
+                    || crate::organize::place_of(&root, e.path()) != crate::organize::Place::Extra
+            })
             .map(|e| e.into_path())
             .collect();
         // Whole songs first, so stems find the song they belong to.
@@ -473,9 +585,11 @@ impl Library {
         }
         let known: Vec<(i64, String)> = {
             let db = self.db();
-            let mut st = db.prepare("SELECT id, path FROM songs WHERE folder_id = ?1 AND path IS NOT NULL")?;
-            
-            st.query_map([folder.id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?
+            let mut st =
+                db.prepare("SELECT id, path FROM songs WHERE folder_id = ?1 AND path IS NOT NULL")?;
+
+            st.query_map([folder.id], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
         };
         for (id, path) in known {
             if !seen.contains(&path) {
@@ -486,7 +600,8 @@ impl Library {
         let known_stems: Vec<(i64, String)> = {
             let db = self.db();
             let mut st = db.prepare("SELECT id, path FROM stems WHERE folder_id = ?1")?;
-            st.query_map([folder.id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?
+            st.query_map([folder.id], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
         };
         for (id, path) in known_stems {
             if !seen.contains(&path) {
@@ -498,7 +613,12 @@ impl Library {
     }
 
     /// Adds or refreshes one audio file. Unchanged files (same modification time) are skipped.
-    pub fn import_file(&self, path: &Path, folder_id: Option<i64>, root: Option<&Path>) -> Result<Imported> {
+    pub fn import_file(
+        &self,
+        path: &Path,
+        folder_id: Option<i64>,
+        root: Option<&Path>,
+    ) -> Result<Imported> {
         use crate::organize::{Place, place_of};
         let managed = self.managed_root(folder_id);
         let place = managed.as_deref().map(|r| place_of(r, path));
@@ -518,16 +638,30 @@ impl Library {
             _ => None,
         };
         let p = path.to_string_lossy().to_string();
-        let mtime = std::fs::metadata(path)?.modified().ok().and_then(|m| m.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64);
-        let existing: Option<(i64, Option<i64>)> =
-            self.db().query_row("SELECT id, file_mtime FROM songs WHERE path = ?1", [&p], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+        let mtime = std::fs::metadata(path)?
+            .modified()
+            .ok()
+            .and_then(|m| m.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64);
+        let existing: Option<(i64, Option<i64>)> = self
+            .db()
+            .query_row(
+                "SELECT id, file_mtime FROM songs WHERE path = ?1",
+                [&p],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
         if let Some((id, old)) = existing
-            && old == mtime {
-                if let Some(d) = &song_dir {
-                    self.db().execute("UPDATE songs SET song_dir = ?2 WHERE id = ?1 AND song_dir IS NULL", params![id, d.to_string_lossy()])?;
-                }
-                return Ok(Imported::Unchanged);
+            && old == mtime
+        {
+            if let Some(d) = &song_dir {
+                self.db().execute(
+                    "UPDATE songs SET song_dir = ?2 WHERE id = ?1 AND song_dir IS NULL",
+                    params![id, d.to_string_lossy()],
+                )?;
             }
+            return Ok(Imported::Unchanged);
+        }
         let mut info = tags::read_track(path, if song_dir.is_some() { None } else { root });
         if existing.is_none()
             && let Some(d) = &song_dir
@@ -560,7 +694,10 @@ impl Library {
                 )?;
                 let id = db.last_insert_rowid();
                 if let Some(d) = &song_dir {
-                    db.execute("UPDATE songs SET song_dir = ?2 WHERE id = ?1", params![id, d.to_string_lossy()])?;
+                    db.execute(
+                        "UPDATE songs SET song_dir = ?2 WHERE id = ?1",
+                        params![id, d.to_string_lossy()],
+                    )?;
                 }
                 drop(db);
                 self.adopt_stems(id, path)?;
@@ -568,7 +705,9 @@ impl Library {
                     self.write_cover(id)?;
                     self.write_sidecar(id)?;
                 }
-                Ok(Imported::Added { untagged: info.genre == genre::UNSORTED })
+                Ok(Imported::Added {
+                    untagged: info.genre == genre::UNSORTED,
+                })
             }
         }
     }
@@ -576,8 +715,12 @@ impl Library {
     /// Drops a single file's song when the file disappears from a watched folder.
     pub fn forget_path(&self, path: &Path) -> Result<bool> {
         let p = path.to_string_lossy();
-        let n = self.db().execute("DELETE FROM songs WHERE path = ?1", [&p])?;
-        let m = self.db().execute("DELETE FROM stems WHERE path = ?1", [&p])?;
+        let n = self
+            .db()
+            .execute("DELETE FROM songs WHERE path = ?1", [&p])?;
+        let m = self
+            .db()
+            .execute("DELETE FROM stems WHERE path = ?1", [&p])?;
         self.drop_empty_stem_songs()?;
         Ok(n + m > 0)
     }
@@ -597,7 +740,11 @@ impl Library {
             for ext in tags::AUDIO_EXTENSIONS {
                 let candidate = d.join(format!("{base}.{ext}"));
                 let id: Option<i64> = db
-                    .query_row("SELECT id FROM songs WHERE path = ?1 COLLATE NOCASE", [candidate.to_string_lossy()], |r| r.get(0))
+                    .query_row(
+                        "SELECT id FROM songs WHERE path = ?1 COLLATE NOCASE",
+                        [candidate.to_string_lossy()],
+                        |r| r.get(0),
+                    )
                     .optional()?;
                 if id.is_some() {
                     return Ok(id);
@@ -607,10 +754,26 @@ impl Library {
         Ok(None)
     }
 
-    fn import_stem(&self, path: &Path, base: &str, name: &str, folder_id: Option<i64>, root: Option<&Path>) -> Result<Imported> {
+    fn import_stem(
+        &self,
+        path: &Path,
+        base: &str,
+        name: &str,
+        folder_id: Option<i64>,
+        root: Option<&Path>,
+    ) -> Result<Imported> {
         let p = path.to_string_lossy().to_string();
-        let mtime = std::fs::metadata(path)?.modified().ok().and_then(|m| m.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64);
-        let existing: Option<Option<i64>> = self.db().query_row("SELECT file_mtime FROM stems WHERE path = ?1", [&p], |r| r.get(0)).optional()?;
+        let mtime = std::fs::metadata(path)?
+            .modified()
+            .ok()
+            .and_then(|m| m.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64);
+        let existing: Option<Option<i64>> = self
+            .db()
+            .query_row("SELECT file_mtime FROM stems WHERE path = ?1", [&p], |r| {
+                r.get(0)
+            })
+            .optional()?;
         if existing == Some(mtime) {
             return Ok(Imported::Unchanged);
         }
@@ -621,12 +784,23 @@ impl Library {
         let song_id = match self.host_song_for(dir, base)? {
             Some(id) => id,
             None => {
-                let found: Option<i64> = self.db().query_row("SELECT id FROM songs WHERE stem_group = ?1", [&group], |r| r.get(0)).optional()?;
+                let found: Option<i64> = self
+                    .db()
+                    .query_row(
+                        "SELECT id FROM songs WHERE stem_group = ?1",
+                        [&group],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
                 match found {
                     Some(id) => id,
                     None => {
                         let genre = self.ensure_genre(&info.genre, "file")?;
-                        let album = if info.album.to_lowercase().ends_with(" stems") { String::new() } else { info.album.clone() };
+                        let album = if info.album.to_lowercase().ends_with(" stems") {
+                            String::new()
+                        } else {
+                            info.album.clone()
+                        };
                         let t = now();
                         let db = self.db();
                         db.execute(
@@ -645,10 +819,26 @@ impl Library {
 
     /// Records one stem file for a song. Stems with better tags (Suno's MP3s carry the artist and
     /// cover art) fill in what the song is missing.
-    pub(crate) fn attach_stem(&self, path: &Path, song_id: i64, name: &str, folder_id: Option<i64>, created: bool) -> Result<Imported> {
+    pub(crate) fn attach_stem(
+        &self,
+        path: &Path,
+        song_id: i64,
+        name: &str,
+        folder_id: Option<i64>,
+        created: bool,
+    ) -> Result<Imported> {
         let p = path.to_string_lossy().to_string();
-        let mtime = std::fs::metadata(path)?.modified().ok().and_then(|m| m.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64);
-        let existing: Option<Option<i64>> = self.db().query_row("SELECT file_mtime FROM stems WHERE path = ?1", [&p], |r| r.get(0)).optional()?;
+        let mtime = std::fs::metadata(path)?
+            .modified()
+            .ok()
+            .and_then(|m| m.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64);
+        let existing: Option<Option<i64>> = self
+            .db()
+            .query_row("SELECT file_mtime FROM stems WHERE path = ?1", [&p], |r| {
+                r.get(0)
+            })
+            .optional()?;
         if existing == Some(mtime) && !created {
             return Ok(Imported::Unchanged);
         }
@@ -676,18 +866,39 @@ impl Library {
             self.write_cover(song_id)?;
             self.write_sidecar(song_id)?;
         }
-        Ok(if created { Imported::Added { untagged: info.genre == genre::UNSORTED } } else if existing.is_some() { Imported::Updated } else { Imported::Unchanged })
+        Ok(if created {
+            Imported::Added {
+                untagged: info.genre == genre::UNSORTED,
+            }
+        } else if existing.is_some() {
+            Imported::Updated
+        } else {
+            Imported::Unchanged
+        })
     }
 
     /// When a whole-song file arrives after its stems, the stems move over to it.
     fn adopt_stems(&self, song_id: i64, path: &Path) -> Result<()> {
-        let (Some(dir), Some(base)) = (path.parent(), path.file_stem().and_then(|s| s.to_str())) else { return Ok(()) };
-        let groups = [Self::stem_group(dir, base), Self::stem_group(&dir.join(format!("{base} Stems")), base)];
+        let (Some(dir), Some(base)) = (path.parent(), path.file_stem().and_then(|s| s.to_str()))
+        else {
+            return Ok(());
+        };
+        let groups = [
+            Self::stem_group(dir, base),
+            Self::stem_group(&dir.join(format!("{base} Stems")), base),
+        ];
         let db = self.db();
         for g in groups {
-            let orphan: Option<i64> = db.query_row("SELECT id FROM songs WHERE stem_group = ?1", [&g], |r| r.get(0)).optional()?;
+            let orphan: Option<i64> = db
+                .query_row("SELECT id FROM songs WHERE stem_group = ?1", [&g], |r| {
+                    r.get(0)
+                })
+                .optional()?;
             if let Some(old) = orphan {
-                db.execute("UPDATE stems SET song_id = ?1 WHERE song_id = ?2", params![song_id, old])?;
+                db.execute(
+                    "UPDATE stems SET song_id = ?1 WHERE song_id = ?2",
+                    params![song_id, old],
+                )?;
                 db.execute("UPDATE songs SET art = COALESCE(art, (SELECT art FROM songs WHERE id = ?2)) WHERE id = ?1", params![song_id, old])?;
                 db.execute("DELETE FROM songs WHERE id = ?1", [old])?;
             }
@@ -704,12 +915,22 @@ impl Library {
     }
 
     pub fn stem_path(&self, id: i64) -> Result<Option<PathBuf>> {
-        Ok(self.db().query_row("SELECT path FROM stems WHERE id = ?1", [id], |r| r.get::<_, String>(0)).optional()?.map(PathBuf::from))
+        Ok(self
+            .db()
+            .query_row("SELECT path FROM stems WHERE id = ?1", [id], |r| {
+                r.get::<_, String>(0)
+            })
+            .optional()?
+            .map(PathBuf::from))
     }
 
     /// The watched folder a path lives in, if any.
     pub fn folder_for(&self, path: &Path) -> Result<Option<Folder>> {
-        Ok(self.folders()?.into_iter().filter(|f| path.starts_with(&f.path)).max_by_key(|f| f.path.len()))
+        Ok(self
+            .folders()?
+            .into_iter()
+            .filter(|f| path.starts_with(&f.path))
+            .max_by_key(|f| f.path.len()))
     }
 
     // ---------- genre tags ----------
@@ -734,8 +955,15 @@ impl Library {
             return Ok(name);
         }
         let db = self.db();
-        db.execute("INSERT OR IGNORE INTO genres(name, origin, created_at) VALUES (?1, ?2, ?3)", params![name, origin, now()])?;
-        Ok(db.query_row("SELECT name FROM genres WHERE name = ?1 COLLATE NOCASE", [&name], |r| r.get(0))?)
+        db.execute(
+            "INSERT OR IGNORE INTO genres(name, origin, created_at) VALUES (?1, ?2, ?3)",
+            params![name, origin, now()],
+        )?;
+        Ok(db.query_row(
+            "SELECT name FROM genres WHERE name = ?1 COLLATE NOCASE",
+            [&name],
+            |r| r.get(0),
+        )?)
     }
 
     pub fn create_genre(&self, raw: &str) -> Result<GenreTag> {
@@ -743,12 +971,19 @@ impl Library {
         if name == genre::UNSORTED {
             bail!("Give the tag a name");
         }
-        let exists: bool = self.db().query_row("SELECT EXISTS(SELECT 1 FROM genres WHERE name = ?1 COLLATE NOCASE)", [&name], |r| r.get(0))?;
+        let exists: bool = self.db().query_row(
+            "SELECT EXISTS(SELECT 1 FROM genres WHERE name = ?1 COLLATE NOCASE)",
+            [&name],
+            |r| r.get(0),
+        )?;
         if exists {
             bail!("There is already a tag called {name}");
         }
         self.ensure_genre(&name, "user")?;
-        self.genres()?.into_iter().find(|g| g.name.eq_ignore_ascii_case(&name)).ok_or_else(|| anyhow!("tag not saved"))
+        self.genres()?
+            .into_iter()
+            .find(|g| g.name.eq_ignore_ascii_case(&name))
+            .ok_or_else(|| anyhow!("tag not saved"))
     }
 
     /// Renames a tag and every song that carries it. Renaming onto an existing tag merges the two.
@@ -759,17 +994,30 @@ impl Library {
         }
         let mut db = self.db();
         let tx = db.transaction()?;
-        let old: String = tx.query_row("SELECT name FROM genres WHERE id = ?1", [id], |r| r.get(0))?;
-        let other: Option<i64> = tx.query_row("SELECT id FROM genres WHERE name = ?1 COLLATE NOCASE AND id <> ?2", params![name, id], |r| r.get(0)).optional()?;
+        let old: String =
+            tx.query_row("SELECT name FROM genres WHERE id = ?1", [id], |r| r.get(0))?;
+        let other: Option<i64> = tx
+            .query_row(
+                "SELECT id FROM genres WHERE name = ?1 COLLATE NOCASE AND id <> ?2",
+                params![name, id],
+                |r| r.get(0),
+            )
+            .optional()?;
         match other {
             Some(_) => {
                 tx.execute("DELETE FROM genres WHERE id = ?1", [id])?;
             }
             None => {
-                tx.execute("UPDATE genres SET name = ?2 WHERE id = ?1", params![id, name])?;
+                tx.execute(
+                    "UPDATE genres SET name = ?2 WHERE id = ?1",
+                    params![id, name],
+                )?;
             }
         }
-        tx.execute("UPDATE songs SET genre = ?2, updated_at = ?3 WHERE genre = ?1 COLLATE NOCASE", params![old, name, now()])?;
+        tx.execute(
+            "UPDATE songs SET genre = ?2, updated_at = ?3 WHERE genre = ?1 COLLATE NOCASE",
+            params![old, name, now()],
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -778,9 +1026,13 @@ impl Library {
     pub fn delete_genre(&self, id: i64) -> Result<()> {
         let mut db = self.db();
         let tx = db.transaction()?;
-        let old: String = tx.query_row("SELECT name FROM genres WHERE id = ?1", [id], |r| r.get(0))?;
+        let old: String =
+            tx.query_row("SELECT name FROM genres WHERE id = ?1", [id], |r| r.get(0))?;
         tx.execute("DELETE FROM genres WHERE id = ?1", [id])?;
-        tx.execute("UPDATE songs SET genre = ?2, updated_at = ?3 WHERE genre = ?1 COLLATE NOCASE", params![old, genre::UNSORTED, now()])?;
+        tx.execute(
+            "UPDATE songs SET genre = ?2, updated_at = ?3 WHERE genre = ?1 COLLATE NOCASE",
+            params![old, genre::UNSORTED, now()],
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -791,11 +1043,20 @@ impl Library {
         let db = self.db();
         let mut lists = db
             .prepare("SELECT id, name FROM playlists ORDER BY created_at, id")?
-            .query_map([], |r| Ok(Playlist { id: r.get(0)?, name: r.get(1)?, songs: vec![] }))?
+            .query_map([], |r| {
+                Ok(Playlist {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    songs: vec![],
+                })
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        let mut st = db.prepare("SELECT song_id FROM playlist_songs WHERE playlist_id = ?1 ORDER BY pos")?;
+        let mut st =
+            db.prepare("SELECT song_id FROM playlist_songs WHERE playlist_id = ?1 ORDER BY pos")?;
         for p in &mut lists {
-            p.songs = st.query_map([p.id], |r| r.get(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            p.songs = st
+                .query_map([p.id], |r| r.get(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
         }
         Ok(lists)
     }
@@ -803,11 +1064,18 @@ impl Library {
     pub fn create_playlist(&self, name: &str, songs: &[i64]) -> Result<Playlist> {
         let id = {
             let db = self.db();
-            db.execute("INSERT INTO playlists(name, created_at) VALUES (?1, ?2)", params![name.trim(), now()])?;
+            db.execute(
+                "INSERT INTO playlists(name, created_at) VALUES (?1, ?2)",
+                params![name.trim(), now()],
+            )?;
             db.last_insert_rowid()
         };
         self.set_playlist_songs(id, songs)?;
-        Ok(Playlist { id, name: name.trim().into(), songs: songs.to_vec() })
+        Ok(Playlist {
+            id,
+            name: name.trim().into(),
+            songs: songs.to_vec(),
+        })
     }
 
     pub fn rename_playlist(&self, id: i64, name: &str) -> Result<()> {
@@ -815,12 +1083,16 @@ impl Library {
         if name.is_empty() {
             bail!("A playlist needs a name");
         }
-        self.db().execute("UPDATE playlists SET name = ?2 WHERE id = ?1", params![id, name])?;
+        self.db().execute(
+            "UPDATE playlists SET name = ?2 WHERE id = ?1",
+            params![id, name],
+        )?;
         Ok(())
     }
 
     pub fn delete_playlist(&self, id: i64) -> Result<()> {
-        self.db().execute("DELETE FROM playlists WHERE id = ?1", [id])?;
+        self.db()
+            .execute("DELETE FROM playlists WHERE id = ?1", [id])?;
         Ok(())
     }
 
@@ -830,7 +1102,10 @@ impl Library {
         tx.execute("DELETE FROM playlist_songs WHERE playlist_id = ?1", [id])?;
         let mut seen = std::collections::HashSet::new();
         for (pos, s) in songs.iter().filter(|s| seen.insert(**s)).enumerate() {
-            tx.execute("INSERT INTO playlist_songs(playlist_id, song_id, pos) VALUES (?1, ?2, ?3)", params![id, s, pos as i64])?;
+            tx.execute(
+                "INSERT INTO playlist_songs(playlist_id, song_id, pos) VALUES (?1, ?2, ?3)",
+                params![id, s, pos as i64],
+            )?;
         }
         tx.commit()?;
         Ok(())
@@ -839,10 +1114,17 @@ impl Library {
     pub fn toggle_in_playlist(&self, id: i64, song: i64, on: bool) -> Result<()> {
         let db = self.db();
         if on {
-            let pos: i64 = db.query_row("SELECT COALESCE(MAX(pos) + 1, 0) FROM playlist_songs WHERE playlist_id = ?1", [id], |r| r.get(0))?;
+            let pos: i64 = db.query_row(
+                "SELECT COALESCE(MAX(pos) + 1, 0) FROM playlist_songs WHERE playlist_id = ?1",
+                [id],
+                |r| r.get(0),
+            )?;
             db.execute("INSERT OR IGNORE INTO playlist_songs(playlist_id, song_id, pos) VALUES (?1, ?2, ?3)", params![id, song, pos])?;
         } else {
-            db.execute("DELETE FROM playlist_songs WHERE playlist_id = ?1 AND song_id = ?2", params![id, song])?;
+            db.execute(
+                "DELETE FROM playlist_songs WHERE playlist_id = ?1 AND song_id = ?2",
+                params![id, song],
+            )?;
         }
         Ok(())
     }
@@ -855,7 +1137,12 @@ impl Library {
         let map = st
             .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
             .filter_map(|r| r.ok())
-            .map(|(k, v)| (k, serde_json::from_str(&v).unwrap_or(serde_json::Value::String(v))))
+            .map(|(k, v)| {
+                (
+                    k,
+                    serde_json::from_str(&v).unwrap_or(serde_json::Value::String(v)),
+                )
+            })
             .collect();
         Ok(map)
     }
@@ -869,18 +1156,33 @@ impl Library {
     }
 
     pub fn setting_bool(&self, key: &str) -> bool {
-        self.settings().ok().and_then(|m| m.get(key).and_then(|v| v.as_bool())).unwrap_or(false)
+        self.settings()
+            .ok()
+            .and_then(|m| m.get(key).and_then(|v| v.as_bool()))
+            .unwrap_or(false)
     }
 
     pub fn setting_str(&self, key: &str) -> Option<String> {
-        self.settings().ok()?.get(key).and_then(|v| v.as_str().map(String::from)).filter(|s| !s.is_empty())
+        self.settings()
+            .ok()?
+            .get(key)
+            .and_then(|v| v.as_str().map(String::from))
+            .filter(|s| !s.is_empty())
     }
 
     // ---------- sheets (uploaded sheet music) ----------
 
     pub fn add_sheet(&self, song: i64, src: &Path) -> Result<Sheet> {
-        let name = src.file_name().and_then(|n| n.to_str()).ok_or_else(|| anyhow!("bad file name"))?.to_string();
-        let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+        let name = src
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| anyhow!("bad file name"))?
+            .to_string();
+        let ext = src
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
         let kind = match ext.as_str() {
             "pdf" => "pdf",
             "musicxml" | "xml" => "musicxml",
@@ -897,21 +1199,31 @@ impl Library {
             "INSERT INTO sheets(song_id, name, kind, path, added_at) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![song, name, kind, dest.to_string_lossy(), t],
         )?;
-        Ok(Sheet { id: db.last_insert_rowid(), name, kind: kind.into(), added_at: t })
+        Ok(Sheet {
+            id: db.last_insert_rowid(),
+            name,
+            kind: kind.into(),
+            added_at: t,
+        })
     }
 
     pub fn remove_sheet(&self, id: i64) -> Result<()> {
         if let Some(p) = self.sheet_path(id)? {
             let _ = std::fs::remove_file(p);
         }
-        self.db().execute("DELETE FROM sheets WHERE id = ?1", [id])?;
+        self.db()
+            .execute("DELETE FROM sheets WHERE id = ?1", [id])?;
         Ok(())
     }
 
     // ---------- takes (audio made for a songwriter song) ----------
 
     pub fn add_take(&self, song: i64, src: &Path, origin: &str) -> Result<Take> {
-        let name = src.file_name().and_then(|n| n.to_str()).ok_or_else(|| anyhow!("bad file name"))?.to_string();
+        let name = src
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| anyhow!("bad file name"))?
+            .to_string();
         if !tags::is_audio(src) {
             bail!("A take has to be an audio file (MP3, WAV, FLAC, M4A or OGG)");
         }
@@ -931,57 +1243,73 @@ impl Library {
              status = CASE WHEN status IN ('writing','ready') THEN 'takes' ELSE status END, updated_at = ?3 WHERE id = ?1",
             params![song, id, t],
         )?;
-        Ok(Take { id, name, origin: origin.into(), added_at: t })
+        Ok(Take {
+            id,
+            name,
+            origin: origin.into(),
+            added_at: t,
+        })
     }
 
     /// Attaches stem files to a song; a folder brings every audio file inside it. Files already in the
     /// library folder move over, and any song they had become on their own is removed; others are copied.
-    pub fn attach_stems(&self, song: i64, paths: &[PathBuf]) -> Result<usize> {
+    /// `to_flac`: store WAV files as FLAC (same audio, about half the size).
+    pub fn attach_stems(&self, song: i64, paths: &[PathBuf], to_flac: bool) -> Result<usize> {
         let title = self.song(song)?.title;
-        let mut files = Vec::new();
-        for p in paths {
-            if p.is_dir() {
-                let mut stack = vec![p.clone()];
-                while let Some(d) = stack.pop() {
-                    for e in std::fs::read_dir(&d)?.flatten() {
-                        let path = e.path();
-                        let hidden = path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.'));
-                        if hidden {
-                            continue;
-                        }
-                        if path.is_dir() {
-                            stack.push(path);
-                        } else if tags::is_audio(&path) {
-                            files.push(path);
-                        }
-                    }
-                }
-            } else if tags::is_audio(p) {
-                files.push(p.clone());
-            }
-        }
-        files.sort();
+        let files = audio_files_in(paths)?;
         if files.is_empty() {
-            bail!("No audio files there. Stems have to be audio files (WAV, MP3, FLAC, M4A or OGG).");
+            bail!(
+                "No audio files there. Stems have to be audio files (WAV, MP3, FLAC, M4A or OGG)."
+            );
         }
         let dir = self.extras_dir(song, "stems")?;
         std::fs::create_dir_all(&dir)?;
         let lib_root = self.library_folder()?.map(|f| PathBuf::from(f.path));
-        let folder_id: Option<i64> = self.db().query_row("SELECT folder_id FROM songs WHERE id = ?1", [song], |r| r.get(0))?;
+        let folder_id: Option<i64> =
+            self.db()
+                .query_row("SELECT folder_id FROM songs WHERE id = ?1", [song], |r| {
+                    r.get(0)
+                })?;
         let mut emptied = Vec::new();
         for src in &files {
             let part = stem_part_name(src, &title);
-            let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("wav").to_ascii_lowercase();
-            let dest = unique_path(&dir, &format!("{}.{ext}", crate::organize::clean_name(&part)));
+            let ext = src
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("wav")
+                .to_ascii_lowercase();
             let sp = src.to_string_lossy().to_string();
             let in_lib = lib_root.as_ref().is_some_and(|r| src.starts_with(r));
-            if in_lib {
+            let flac = (to_flac && ext == "wav")
+                .then(|| {
+                    unique_path(
+                        &dir,
+                        &format!("{}.flac", crate::organize::clean_name(&part)),
+                    )
+                })
+                .filter(|f| crate::audio::wav_to_flac(src, f).unwrap_or(false));
+            let dest = match flac {
+                Some(f) => f,
+                None => unique_path(
+                    &dir,
+                    &format!("{}.{ext}", crate::organize::clean_name(&part)),
+                ),
+            };
+            let converted = dest.extension().is_some_and(|e| e == "flac") && ext == "wav";
+            if converted {
+                if in_lib {
+                    std::fs::remove_file(src)?;
+                }
+            } else if in_lib {
                 if std::fs::rename(src, &dest).is_err() {
-                    std::fs::copy(src, &dest).with_context(|| format!("copying {}", src.display()))?;
+                    std::fs::copy(src, &dest)
+                        .with_context(|| format!("copying {}", src.display()))?;
                     std::fs::remove_file(src)?;
                 }
             } else {
                 std::fs::copy(src, &dest).with_context(|| format!("copying {}", src.display()))?;
+            }
+            if !in_lib {
                 // Dropped into the app earlier, the same file was copied into the library as its own song or stem.
                 if let Some(root) = &lib_root {
                     for (kind, id, path) in self.library_copies_of(src, root, song)? {
@@ -991,19 +1319,32 @@ impl Library {
                             db.execute("UPDATE songs SET path = NULL WHERE id = ?1", [id])?;
                             emptied.push(id);
                         } else {
-                            let owner: i64 = db.query_row("SELECT song_id FROM stems WHERE id = ?1", [id], |r| r.get(0))?;
+                            let owner: i64 = db.query_row(
+                                "SELECT song_id FROM stems WHERE id = ?1",
+                                [id],
+                                |r| r.get(0),
+                            )?;
                             db.execute("DELETE FROM stems WHERE id = ?1", [id])?;
                             emptied.push(owner);
                         }
                     }
                 }
             }
-            let mtime = std::fs::metadata(&dest)?.modified().ok().and_then(|m| m.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64);
+            let mtime = std::fs::metadata(&dest)?
+                .modified()
+                .ok()
+                .and_then(|m| m.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64);
             let dp = dest.to_string_lossy().to_string();
             let db = self.db();
             // A file that already was a stem of another song moves its row here.
-            let was_stem: Option<(i64, i64)> =
-                db.query_row("SELECT id, song_id FROM stems WHERE path = ?1", [&sp], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+            let was_stem: Option<(i64, i64)> = db
+                .query_row(
+                    "SELECT id, song_id FROM stems WHERE path = ?1",
+                    [&sp],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
             match (was_stem, in_lib) {
                 (Some((sid, owner)), true) => {
                     db.execute("UPDATE stems SET song_id = ?2, name = ?3, path = ?4, file_mtime = ?5, folder_id = ?6 WHERE id = ?1", params![sid, song, part, dp, mtime, folder_id])?;
@@ -1017,7 +1358,13 @@ impl Library {
             }
             // A file that had been imported as its own song stops being one.
             if in_lib {
-                let was_song: Option<i64> = db.query_row("SELECT id FROM songs WHERE path = ?1 AND id != ?2", params![sp, song], |r| r.get(0)).optional()?;
+                let was_song: Option<i64> = db
+                    .query_row(
+                        "SELECT id FROM songs WHERE path = ?1 AND id != ?2",
+                        params![sp, song],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
                 if let Some(other) = was_song {
                     db.execute("UPDATE songs SET path = NULL WHERE id = ?1", [other])?;
                     emptied.push(other);
@@ -1027,21 +1374,85 @@ impl Library {
         for other in emptied {
             self.drop_if_empty(other)?;
         }
-        self.db().execute("UPDATE songs SET updated_at = ?2 WHERE id = ?1", params![song, now()])?;
+        self.db().execute(
+            "UPDATE songs SET updated_at = ?2 WHERE id = ?1",
+            params![song, now()],
+        )?;
         self.write_sidecar(song)?;
         Ok(files.len())
     }
 
+    /// Converts WAV stems already in the library to FLAC (all songs, or one). The WAV is deleted only after
+    /// its FLAC copy decodes to exactly the same samples. Returns (converted, bytes before, bytes after).
+    pub fn convert_stems_to_flac(&self, song: Option<i64>) -> Result<(usize, u64, u64)> {
+        let rows: Vec<(i64, String)> = {
+            let db = self.db();
+            let mut st = db.prepare("SELECT id, path FROM stems WHERE (?1 IS NULL OR song_id = ?1) AND lower(path) LIKE '%.wav'")?;
+            st.query_map([song], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?
+        };
+        let (mut n, mut before, mut after) = (0, 0, 0);
+        let mut songs = std::collections::BTreeSet::new();
+        for (id, path) in rows {
+            let wav = PathBuf::from(&path);
+            let Some(dir) = wav.parent() else { continue };
+            let name = wav.file_stem().and_then(|s| s.to_str()).unwrap_or("Stem");
+            let flac = unique_path(dir, &format!("{name}.flac"));
+            if !crate::audio::wav_to_flac(&wav, &flac)? {
+                continue;
+            }
+            let (b, a) = (
+                std::fs::metadata(&wav)?.len(),
+                std::fs::metadata(&flac)?.len(),
+            );
+            let mtime = std::fs::metadata(&flac)?
+                .modified()
+                .ok()
+                .and_then(|m| m.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64);
+            let owner: i64 = {
+                let db = self.db();
+                db.execute(
+                    "UPDATE stems SET path = ?2, file_mtime = ?3 WHERE id = ?1",
+                    params![id, flac.to_string_lossy(), mtime],
+                )?;
+                db.query_row("SELECT song_id FROM stems WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })?
+            };
+            std::fs::remove_file(&wav)?;
+            songs.insert(owner);
+            n += 1;
+            before += b;
+            after += a;
+        }
+        for id in songs {
+            self.write_sidecar(id)?;
+        }
+        Ok((n, before, after))
+    }
+
     /// Songs and stems inside the library folder whose file is a byte-for-byte copy of `src`.
-    fn library_copies_of(&self, src: &Path, root: &Path, except_song: i64) -> Result<Vec<(&'static str, i64, PathBuf)>> {
+    fn library_copies_of(
+        &self,
+        src: &Path,
+        root: &Path,
+        except_song: i64,
+    ) -> Result<Vec<(&'static str, i64, PathBuf)>> {
         let len = std::fs::metadata(src)?.len();
         let candidates: Vec<(&'static str, i64, String)> = {
             let db = self.db();
             let mut out = Vec::new();
             let mut st = db.prepare("SELECT id, path FROM songs WHERE path IS NOT NULL AND id != ?1 AND source = 'library'")?;
-            out.extend(st.query_map([except_song], |r| Ok(("song", r.get(0)?, r.get(1)?)))?.flatten());
+            out.extend(
+                st.query_map([except_song], |r| Ok(("song", r.get(0)?, r.get(1)?)))?
+                    .flatten(),
+            );
             let mut st = db.prepare("SELECT id, path FROM stems WHERE song_id != ?1")?;
-            out.extend(st.query_map([except_song], |r| Ok(("stem", r.get(0)?, r.get(1)?)))?.flatten());
+            out.extend(
+                st.query_map([except_song], |r| Ok(("stem", r.get(0)?, r.get(1)?)))?
+                    .flatten(),
+            );
             out
         };
         let mut found = Vec::new();
@@ -1077,10 +1488,18 @@ impl Library {
         self.db().execute("DELETE FROM songs WHERE id = ?1", [id])?;
         if let Some(dir) = dir.map(PathBuf::from) {
             for d in [dir.join("stems"), dir.clone()] {
-                let junk_only = std::fs::read_dir(&d).map(|r| r.flatten().all(|e| {
-                    let n = e.file_name().to_string_lossy().to_lowercase();
-                    n == "song.json" || n == ".ds_store" || n == "desktop.ini" || n == "thumbs.db" || n.starts_with("cover.")
-                })).unwrap_or(false);
+                let junk_only = std::fs::read_dir(&d)
+                    .map(|r| {
+                        r.flatten().all(|e| {
+                            let n = e.file_name().to_string_lossy().to_lowercase();
+                            n == "song.json"
+                                || n == ".ds_store"
+                                || n == "desktop.ini"
+                                || n == "thumbs.db"
+                                || n.starts_with("cover.")
+                        })
+                    })
+                    .unwrap_or(false);
                 if junk_only {
                     let _ = std::fs::remove_dir_all(&d);
                 }
@@ -1090,7 +1509,10 @@ impl Library {
     }
 
     pub fn set_master_take(&self, song: i64, take: i64) -> Result<()> {
-        self.db().execute("UPDATE songs SET master_take = ?2, updated_at = ?3 WHERE id = ?1", params![song, take, now()])?;
+        self.db().execute(
+            "UPDATE songs SET master_take = ?2, updated_at = ?3 WHERE id = ?1",
+            params![song, take, now()],
+        )?;
         Ok(())
     }
 
@@ -1098,14 +1520,22 @@ impl Library {
         if !["writing", "ready", "takes", "done"].contains(&status) {
             bail!("unknown status {status}");
         }
-        self.db().execute("UPDATE songs SET status = ?2, updated_at = ?3 WHERE id = ?1", params![song, status, now()])?;
+        self.db().execute(
+            "UPDATE songs SET status = ?2, updated_at = ?3 WHERE id = ?1",
+            params![song, status, now()],
+        )?;
         Ok(())
     }
 
     // ---------- songwriter songs ----------
 
     /// Creates a song the songwriter is about to write.
-    pub fn create_request(&self, request: &str, genre_hint: Option<&str>, writer: &str) -> Result<Song> {
+    pub fn create_request(
+        &self,
+        request: &str,
+        genre_hint: Option<&str>,
+        writer: &str,
+    ) -> Result<Song> {
         let t = now();
         let genre = self.ensure_genre(genre_hint.unwrap_or(""), "user")?;
         let id = {
@@ -1129,8 +1559,13 @@ impl Library {
         let ids: Vec<i64> = {
             let db = self.db();
             let mut st = db.prepare("SELECT id FROM songs WHERE source = 'ai' AND artist = ?1")?;
-            let ids = st.query_map([old], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
-            db.execute("UPDATE songs SET artist = ?2, updated_at = ?3 WHERE source = 'ai' AND artist = ?1", params![old, new, now()])?;
+            let ids = st
+                .query_map([old], |r| r.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            db.execute(
+                "UPDATE songs SET artist = ?2, updated_at = ?3 WHERE source = 'ai' AND artist = ?1",
+                params![old, new, now()],
+            )?;
             ids
         };
         for &id in &ids {
@@ -1142,7 +1577,11 @@ impl Library {
     /// Stores a draft or rewrite from the songwriter and records it as a new version.
     pub fn apply_draft(&self, id: i64, d: &Draft, note: &str, keep_genre: bool) -> Result<Song> {
         let t = now();
-        let genre = if keep_genre { genre::UNSORTED.to_string() } else { self.ensure_genre(&d.genre, "writer")? };
+        let genre = if keep_genre {
+            genre::UNSORTED.to_string()
+        } else {
+            self.ensure_genre(&d.genre, "writer")?
+        };
         {
             let db = self.db();
             let genre_sql = if keep_genre { "genre" } else { "?11" };
@@ -1168,7 +1607,11 @@ impl Library {
                     d.chords.as_ref().filter(|c| !c.is_empty()).map(|c| serde_json::to_string(c).unwrap_or_default()),
                 ],
             )?;
-            let n: i64 = db.query_row("SELECT COUNT(*) FROM versions WHERE song_id = ?1", [id], |r| r.get(0))?;
+            let n: i64 = db.query_row(
+                "SELECT COUNT(*) FROM versions WHERE song_id = ?1",
+                [id],
+                |r| r.get(0),
+            )?;
             db.execute(
                 "INSERT INTO versions(song_id, label, note, title, lyrics, style, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![id, format!("v{}", n + 1), note, d.title, d.lyrics, d.style, t],
@@ -1181,7 +1624,10 @@ impl Library {
     }
 
     pub fn add_message(&self, id: i64, role: &str, text: &str) -> Result<()> {
-        self.db().execute("INSERT INTO messages(song_id, role, text, created_at) VALUES (?1, ?2, ?3, ?4)", params![id, role, text, now()])?;
+        self.db().execute(
+            "INSERT INTO messages(song_id, role, text, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![id, role, text, now()],
+        )?;
         self.write_sidecar(id)
     }
 
@@ -1194,7 +1640,9 @@ impl Library {
     /// The file to play for a song: its own file, or the master take for songwriter songs.
     pub fn audio_path(&self, id: i64) -> Result<Option<PathBuf>> {
         let db = self.db();
-        let own: Option<Option<String>> = db.query_row("SELECT path FROM songs WHERE id = ?1", [id], |r| r.get(0)).optional()?;
+        let own: Option<Option<String>> = db
+            .query_row("SELECT path FROM songs WHERE id = ?1", [id], |r| r.get(0))
+            .optional()?;
         if let Some(Some(p)) = own {
             return Ok(Some(p.into()));
         }
@@ -1210,11 +1658,23 @@ impl Library {
     }
 
     pub fn take_path(&self, id: i64) -> Result<Option<PathBuf>> {
-        Ok(self.db().query_row("SELECT path FROM takes WHERE id = ?1", [id], |r| r.get::<_, String>(0)).optional()?.map(PathBuf::from))
+        Ok(self
+            .db()
+            .query_row("SELECT path FROM takes WHERE id = ?1", [id], |r| {
+                r.get::<_, String>(0)
+            })
+            .optional()?
+            .map(PathBuf::from))
     }
 
     pub fn sheet_path(&self, id: i64) -> Result<Option<PathBuf>> {
-        Ok(self.db().query_row("SELECT path FROM sheets WHERE id = ?1", [id], |r| r.get::<_, String>(0)).optional()?.map(PathBuf::from))
+        Ok(self
+            .db()
+            .query_row("SELECT path FROM sheets WHERE id = ?1", [id], |r| {
+                r.get::<_, String>(0)
+            })
+            .optional()?
+            .map(PathBuf::from))
     }
 
     /// Art files are addressed by name; only plain names inside the art folder resolve.
@@ -1235,7 +1695,42 @@ pub enum Imported {
 }
 
 fn is_hidden(path: &Path) -> bool {
-    path.components().any(|c| c.as_os_str().to_str().is_some_and(|s| s.starts_with('.') && s.len() > 1 && s != ".."))
+    path.components().any(|c| {
+        c.as_os_str()
+            .to_str()
+            .is_some_and(|s| s.starts_with('.') && s.len() > 1 && s != "..")
+    })
+}
+
+/// Audio files among `paths`; folders bring every audio file inside them (hidden files skipped), sorted.
+pub fn audio_files_in(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    for p in paths {
+        if p.is_dir() {
+            let mut stack = vec![p.clone()];
+            while let Some(d) = stack.pop() {
+                for e in std::fs::read_dir(&d)?.flatten() {
+                    let path = e.path();
+                    let hidden = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.starts_with('.'));
+                    if hidden {
+                        continue;
+                    }
+                    if path.is_dir() {
+                        stack.push(path);
+                    } else if tags::is_audio(&path) {
+                        files.push(path);
+                    }
+                }
+            }
+        } else if tags::is_audio(p) {
+            files.push(p.clone());
+        }
+    }
+    files.sort();
+    Ok(files)
 }
 
 /// A stem's part name: "Song (Vocals).wav" gives "Vocals"; "Song - Drums.wav" or "Drums.wav" gives "Drums".
@@ -1243,10 +1738,25 @@ fn stem_part_name(path: &Path, title: &str) -> String {
     if let Some((_, name)) = tags::stem_of(path) {
         return name;
     }
-    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Stem").trim();
-    let rest = if !title.is_empty() && stem.len() > title.len() && stem[..title.len()].eq_ignore_ascii_case(title) { &stem[title.len()..] } else { stem };
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Stem")
+        .trim();
+    let rest = if !title.is_empty()
+        && stem.len() > title.len()
+        && stem[..title.len()].eq_ignore_ascii_case(title)
+    {
+        &stem[title.len()..]
+    } else {
+        stem
+    };
     let rest = rest.trim_matches(|c: char| c.is_whitespace() || "-_()[].".contains(c));
-    if rest.is_empty() { stem.to_string() } else { rest.to_string() }
+    if rest.is_empty() {
+        stem.to_string()
+    } else {
+        rest.to_string()
+    }
 }
 
 fn unique_path(dir: &Path, name: &str) -> PathBuf {
@@ -1256,8 +1766,15 @@ fn unique_path(dir: &Path, name: &str) -> PathBuf {
     }
     let p = Path::new(name);
     let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
-    let ext = p.extension().and_then(|e| e.to_str()).map(|e| format!(".{e}")).unwrap_or_default();
-    (2..).map(|i| dir.join(format!("{stem} ({i}){ext}"))).find(|c| !c.exists()).expect("unbounded range")
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| format!(".{e}"))
+        .unwrap_or_default();
+    (2..)
+        .map(|i| dir.join(format!("{stem} ({i}){ext}")))
+        .find(|c| !c.exists())
+        .expect("unbounded range")
 }
 
 #[cfg(test)]
@@ -1285,7 +1802,11 @@ mod tests {
         assert_eq!(songs[0].artist, "Band");
         assert_eq!(songs[0].album, "Album");
         assert!(songs[0].has_audio);
-        assert_eq!(l.scan_folder(&f).unwrap().added, 0, "unchanged files are skipped");
+        assert_eq!(
+            l.scan_folder(&f).unwrap().added,
+            0,
+            "unchanged files are skipped"
+        );
         std::fs::remove_file(music.join("01 First.mp3")).unwrap();
         assert_eq!(l.scan_folder(&f).unwrap().removed, 1);
         assert!(l.songs().unwrap().is_empty());
@@ -1296,7 +1817,12 @@ mod tests {
         let (dir, l) = lib();
         let stems = dir.path().join("music/Every Leaf Stems");
         std::fs::create_dir_all(&stems).unwrap();
-        for f in ["Every Leaf (Vocals).wav", "Every Leaf (Vocals).mp3", "Every Leaf (Drums).mp3", "Every Leaf (Backing Vocals).wav"] {
+        for f in [
+            "Every Leaf (Vocals).wav",
+            "Every Leaf (Vocals).mp3",
+            "Every Leaf (Drums).mp3",
+            "Every Leaf (Backing Vocals).wav",
+        ] {
             std::fs::write(stems.join(f), b"x").unwrap();
         }
         let f = l.add_folder(&dir.path().join("music")).unwrap();
@@ -1304,7 +1830,15 @@ mod tests {
         assert_eq!(r.added, 1, "four stem files are one song");
         let songs = l.songs().unwrap();
         assert_eq!(songs.len(), 1);
-        assert_eq!((songs[0].title.as_str(), songs[0].stems, songs[0].has_file, songs[0].has_audio), ("Every Leaf", 4, false, true));
+        assert_eq!(
+            (
+                songs[0].title.as_str(),
+                songs[0].stems,
+                songs[0].has_file,
+                songs[0].has_audio
+            ),
+            ("Every Leaf", 4, false, true)
+        );
         assert_eq!(songs[0].album, "", "the 'X Stems' folder is not an album");
         assert_eq!(l.scan_folder(&f).unwrap().added, 0);
 
@@ -1315,7 +1849,15 @@ mod tests {
         assert_eq!(songs.len(), 1);
         assert_eq!((songs[0].stems, songs[0].has_file), (4, true));
         let detail = l.song_detail(songs[0].id).unwrap();
-        assert_eq!(detail.stem_files.iter().filter(|s| s.name == "Vocals").count(), 2, "wav and mp3 of one part");
+        assert_eq!(
+            detail
+                .stem_files
+                .iter()
+                .filter(|s| s.name == "Vocals")
+                .count(),
+            2,
+            "wav and mp3 of one part"
+        );
 
         // Deleting the stems leaves the full song.
         std::fs::remove_dir_all(&stems).unwrap();
@@ -1350,7 +1892,9 @@ mod tests {
     #[test]
     fn playlists_keep_order_and_membership() {
         let (_d, l) = lib();
-        let a = l.create_request("a folk song", Some("folk"), "Bard").unwrap();
+        let a = l
+            .create_request("a folk song", Some("folk"), "Bard")
+            .unwrap();
         let b = l.create_request("a rock song", None, "Bard").unwrap();
         let p = l.create_playlist("Road trip", &[b.id, a.id]).unwrap();
         assert_eq!(l.playlists().unwrap()[0].songs, vec![b.id, a.id]);
@@ -1366,28 +1910,66 @@ mod tests {
         let (_d, l) = lib();
         let a = l.create_request("a folk song", None, "Bard").unwrap();
         let b = l.create_request("a rock song", None, "Bard").unwrap();
-        l.update_song(b.id, &SongPatch { artist: Some("Me".into()), ..Default::default() }).unwrap();
+        l.update_song(
+            b.id,
+            &SongPatch {
+                artist: Some("Me".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(l.rename_writer("Bard", "Ari").unwrap(), 1);
         assert_eq!(l.song(a.id).unwrap().artist, "Ari");
-        assert_eq!(l.song(b.id).unwrap().artist, "Me", "a hand-set artist stays");
+        assert_eq!(
+            l.song(b.id).unwrap().artist,
+            "Me",
+            "a hand-set artist stays"
+        );
     }
 
     #[test]
     fn stems_attach_to_a_song_from_a_folder() {
         let (d, l) = lib();
         let s = l.create_request("a song", None, "Bard").unwrap();
-        l.apply_draft(s.id, &Draft { title: "Porch Light".into(), lyrics: "x".into(), ..Default::default() }, "v", false).unwrap();
+        l.apply_draft(
+            s.id,
+            &Draft {
+                title: "Porch Light".into(),
+                lyrics: "x".into(),
+                ..Default::default()
+            },
+            "v",
+            false,
+        )
+        .unwrap();
         let src = d.path().join("Porch Light Stems");
         std::fs::create_dir_all(&src).unwrap();
-        for f in ["Porch Light (Vocals).wav", "Porch Light - Drums.mp3", "Bass.flac", "notes.txt"] {
+        for f in [
+            "Porch Light (Vocals).wav",
+            "Porch Light - Drums.mp3",
+            "Bass.flac",
+            "notes.txt",
+        ] {
             std::fs::write(src.join(f), b"x").unwrap();
         }
-        assert_eq!(l.attach_stems(s.id, &[src.clone()]).unwrap(), 3);
-        let mut names: Vec<String> = l.song_detail(s.id).unwrap().stem_files.into_iter().map(|f| f.name).collect();
+        assert_eq!(l.attach_stems(s.id, &[src.clone()], false).unwrap(), 3);
+        let mut names: Vec<String> = l
+            .song_detail(s.id)
+            .unwrap()
+            .stem_files
+            .into_iter()
+            .map(|f| f.name)
+            .collect();
         names.sort();
         assert_eq!(names, ["Bass", "Drums", "Vocals"]);
-        assert!(src.join("Bass.flac").exists(), "files outside the library are copied, not moved");
-        assert!(l.attach_stems(s.id, &[d.path().join("nothing-here")]).is_err());
+        assert!(
+            src.join("Bass.flac").exists(),
+            "files outside the library are copied, not moved"
+        );
+        assert!(
+            l.attach_stems(s.id, &[d.path().join("nothing-here")], false)
+                .is_err()
+        );
     }
 
     #[test]
@@ -1401,14 +1983,31 @@ mod tests {
         l.scan_folder(&f).unwrap();
         assert_eq!(l.songs().unwrap().len(), 1);
         let s = l.create_request("a song", None, "Bard").unwrap();
-        l.apply_draft(s.id, &Draft { title: "Porch Light".into(), lyrics: "x".into(), ..Default::default() }, "v", false).unwrap();
-        assert_eq!(l.attach_stems(s.id, &[stray.clone()]).unwrap(), 1);
+        l.apply_draft(
+            s.id,
+            &Draft {
+                title: "Porch Light".into(),
+                lyrics: "x".into(),
+                ..Default::default()
+            },
+            "v",
+            false,
+        )
+        .unwrap();
+        assert_eq!(l.attach_stems(s.id, &[stray.clone()], false).unwrap(), 1);
         let songs = l.songs().unwrap();
         assert_eq!(songs.len(), 1, "the stray song is gone");
         assert_eq!(songs[0].stems, 1);
-        assert!(!stray.exists() && !root.join("Songs/Guitar").exists(), "moved, and its emptied folder removed");
+        assert!(
+            !stray.exists() && !root.join("Songs/Guitar").exists(),
+            "moved, and its emptied folder removed"
+        );
         l.scan_folder(&f).unwrap();
-        assert_eq!(l.songs().unwrap().len(), 1, "a rescan does not bring it back");
+        assert_eq!(
+            l.songs().unwrap().len(),
+            1,
+            "a rescan does not bring it back"
+        );
         assert_eq!(l.song(s.id).unwrap().stems, 1);
     }
 
@@ -1425,17 +2024,39 @@ mod tests {
         std::fs::write(&copy, b"bass bytes").unwrap();
         l.scan_folder(&f).unwrap();
         let s = l.create_request("a song", None, "Bard").unwrap();
-        l.apply_draft(s.id, &Draft { title: "Porch Light".into(), lyrics: "x".into(), ..Default::default() }, "v", false).unwrap();
-        l.attach_stems(s.id, &[outside.clone()]).unwrap();
-        assert_eq!(l.songs().unwrap().len(), 1, "the library copy's song is gone");
+        l.apply_draft(
+            s.id,
+            &Draft {
+                title: "Porch Light".into(),
+                lyrics: "x".into(),
+                ..Default::default()
+            },
+            "v",
+            false,
+        )
+        .unwrap();
+        l.attach_stems(s.id, &[outside.clone()], false).unwrap();
+        assert_eq!(
+            l.songs().unwrap().len(),
+            1,
+            "the library copy's song is gone"
+        );
         assert!(!copy.exists() && outside.join("Porch Light (Bass).mp3").exists());
     }
 
     #[test]
     fn drafts_become_versions() {
         let (_d, l) = lib();
-        let s = l.create_request("sad country song", Some("Country"), "Bard").unwrap();
-        let d = Draft { title: "Porch Light".into(), genre: "Country".into(), lyrics: "[Verse]\nHello".into(), bpm: 80, ..Default::default() };
+        let s = l
+            .create_request("sad country song", Some("Country"), "Bard")
+            .unwrap();
+        let d = Draft {
+            title: "Porch Light".into(),
+            genre: "Country".into(),
+            lyrics: "[Verse]\nHello".into(),
+            bpm: 80,
+            ..Default::default()
+        };
         let s2 = l.apply_draft(s.id, &d, "First draft", false).unwrap();
         assert_eq!(s2.title, "Porch Light");
         assert_eq!(s2.status.as_deref(), Some("ready"));
@@ -1447,12 +2068,27 @@ mod tests {
     #[test]
     fn genre_tags_are_created_renamed_and_deleted() {
         let (_d, l) = lib();
-        assert!(l.genres().unwrap().iter().any(|g| g.name == "Rock" && g.origin == "default"));
-        let s = l.create_request("a song", Some("sea shanty"), "Bard").unwrap();
+        assert!(
+            l.genres()
+                .unwrap()
+                .iter()
+                .any(|g| g.name == "Rock" && g.origin == "default")
+        );
+        let s = l
+            .create_request("a song", Some("sea shanty"), "Bard")
+            .unwrap();
         assert_eq!(s.genre, "Sea Shanty");
-        let tag = l.genres().unwrap().into_iter().find(|g| g.name == "Sea Shanty").unwrap();
+        let tag = l
+            .genres()
+            .unwrap()
+            .into_iter()
+            .find(|g| g.name == "Sea Shanty")
+            .unwrap();
         assert_eq!((tag.origin.as_str(), tag.songs), ("user", 1));
-        assert!(l.create_genre("sea SHANTY").is_err(), "duplicates are refused");
+        assert!(
+            l.create_genre("sea SHANTY").is_err(),
+            "duplicates are refused"
+        );
         l.rename_genre(tag.id, "Shanty").unwrap();
         assert_eq!(l.song(s.id).unwrap().genre, "Shanty");
         l.delete_genre(tag.id).unwrap();
@@ -1465,22 +2101,39 @@ mod tests {
     fn streaming_songs_save_once() {
         let (_d, l) = lib();
         let e = ExternalSong {
-            provider: "apple".into(), provider_id: "1440833098".into(), title: "Song".into(), artist: "Band".into(),
-            album: "Album".into(), genre: "Alternative".into(), year: "2019".into(), track: Some(3), duration: Some(201.0),
+            provider: "apple".into(),
+            provider_id: "1440833098".into(),
+            title: "Song".into(),
+            artist: "Band".into(),
+            album: "Album".into(),
+            genre: "Alternative".into(),
+            year: "2019".into(),
+            track: Some(3),
+            duration: Some(201.0),
             art_url: Some("https://is1-ssl.mzstatic.com/{w}x{h}bb.jpg".into()),
         };
         let a = l.save_external_song(&e).unwrap();
         let b = l.save_external_song(&e).unwrap();
         assert_eq!(a.id, b.id);
-        assert_eq!((a.provider.as_str(), a.provider_id.as_deref(), a.has_audio), ("apple", Some("1440833098"), false));
+        assert_eq!(
+            (a.provider.as_str(), a.provider_id.as_deref(), a.has_audio),
+            ("apple", Some("1440833098"), false)
+        );
         assert_eq!(l.songs().unwrap().len(), 1);
-        assert!(l.save_external_song(&ExternalSong { provider: "nope".into(), ..e }).is_err());
+        assert!(
+            l.save_external_song(&ExternalSong {
+                provider: "nope".into(),
+                ..e
+            })
+            .is_err()
+        );
     }
 
     #[test]
     fn settings_round_trip() {
         let (_d, l) = lib();
-        l.set_setting("sidebarDefault", &serde_json::json!("genres")).unwrap();
+        l.set_setting("sidebarDefault", &serde_json::json!("genres"))
+            .unwrap();
         assert_eq!(l.setting_str("sidebarDefault").as_deref(), Some("genres"));
     }
 }

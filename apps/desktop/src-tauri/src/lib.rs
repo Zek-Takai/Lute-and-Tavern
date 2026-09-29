@@ -281,8 +281,36 @@ async fn export_text(path: String, contents: String) -> Res<()> {
 
 /// Attaches stem files, or whole folders of them, to a song.
 #[tauri::command]
-async fn attach_stems(state: State<'_, AppState>, song: i64, paths: Vec<String>) -> Res<usize> {
-    blocking(&state, move |l| l.attach_stems(song, &paths.into_iter().map(PathBuf::from).collect::<Vec<_>>())).await
+async fn attach_stems(state: State<'_, AppState>, song: i64, paths: Vec<String>, to_flac: bool) -> Res<usize> {
+    blocking(&state, move |l| l.attach_stems(song, &paths.into_iter().map(PathBuf::from).collect::<Vec<_>>(), to_flac)).await
+}
+
+/// How many WAV files are among the picked files or folders (so the interface knows whether to offer FLAC).
+#[tauri::command]
+async fn stems_wav_count(state: State<'_, AppState>, paths: Vec<String>) -> Res<usize> {
+    blocking(&state, move |_| {
+        let files = lt_core::library::audio_files_in(&paths.into_iter().map(PathBuf::from).collect::<Vec<_>>())?;
+        Ok(files.iter().filter(|f| f.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav"))).count())
+    })
+    .await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Converted {
+    count: usize,
+    bytes_before: u64,
+    bytes_after: u64,
+}
+
+/// Converts WAV stems already in the library to FLAC (one song, or all when `song` is empty).
+#[tauri::command]
+async fn convert_stems_to_flac(state: State<'_, AppState>, song: Option<i64>) -> Res<Converted> {
+    blocking(&state, move |l| {
+        let (count, bytes_before, bytes_after) = l.convert_stems_to_flac(song)?;
+        Ok(Converted { count, bytes_before, bytes_after })
+    })
+    .await
 }
 
 #[tauri::command]
@@ -424,6 +452,8 @@ pub fn run() {
             export_text,
             add_take,
             attach_stems,
+            stems_wav_count,
+            convert_stems_to_flac,
             set_master_take,
             set_status,
             writer::writer_config,

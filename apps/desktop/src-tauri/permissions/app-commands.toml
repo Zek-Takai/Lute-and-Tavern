@@ -31,6 +31,8 @@ commands.allow = [
   "export_text",
   "add_take",
   "attach_stems",
+  "stems_wav_count",
+  "convert_stems_to_flac",
   "set_master_take",
   "set_status",
   "writer_config",

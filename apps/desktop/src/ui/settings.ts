@@ -149,6 +149,16 @@ function render() {
     </section>
 
     <section class="set-sec">
+      <h3>Stems</h3>
+      <p class="muted small">When you attach WAV stems, they can be stored as FLAC instead: exactly the same sound in about half the space. Keep WAV if you open stems in an app that can't read FLAC, such as Logic Pro or GarageBand.</p>
+      <fieldset class="choice">
+        <legend>WAV stems</legend>
+        ${[['ask', 'Ask each time'], ['always', 'Always store WAV stems as FLAC'], ['never', 'Always keep WAV']].map(([v, l]) => `<label><input type="radio" name="stemsFlac" value="${v}" ${((state.settings.stemsFlac as string) || 'ask') === v ? 'checked' : ''}> ${l}</label>`).join('')}
+      </fieldset>
+      <div class="row"><button class="btn" id="flacAll">Convert WAV stems already in my library</button><span class="muted small" id="flacStatus"></span></div>
+    </section>
+
+    <section class="set-sec">
       <h3>AI apps (MCP)</h3>
       <p class="muted small">Lets AI apps on this computer that support MCP (Claude, Hermes and others) write Suno songs straight into your library. They get a Suno songwriting guide and tools to list, create and revise written songs, nothing else. Only works while Lute &amp; Tavern is open.</p>
       <label class="row"><input type="checkbox" id="mcpOn" ${mcp.enabled ? 'checked' : ''}> Let AI apps write songs here</label>
@@ -316,6 +326,22 @@ function render() {
     }
   });
   document.getElementById('amForget')?.addEventListener('click', async () => { await forgetAppleKey(); apple = await appleStatus(); render(); });
+  document.querySelectorAll<HTMLInputElement>('input[name=stemsFlac]').forEach((r) => (r.onchange = () => void saveSetting('stemsFlac', r.value)));
+  $('#flacAll').onclick = async () => {
+    const st = (t: string) => ($('#flacStatus').textContent = t);
+    const btn = $<HTMLButtonElement>('#flacAll');
+    btn.disabled = true;
+    st('Converting… this can take a minute for big stems.');
+    try {
+      const r = await api.convertStemsToFlac(null);
+      const mb = (b: number) => `${Math.round(b / 1048576)} MB`;
+      st(r.count ? `Converted ${r.count} stem${r.count === 1 ? '' : 's'}: ${mb(r.bytesBefore)} became ${mb(r.bytesAfter)}.` : 'No WAV stems to convert.');
+      await reload();
+    } catch (e) {
+      st(errText(e));
+    }
+    btn.disabled = false;
+  };
   $('#wExclude').onchange = (e) => void saveSetting('writerExclude', (e.target as HTMLInputElement).checked);
   $('#mcpOn').onchange = async (e) => {
     mcp = await api.mcpSetEnabled((e.target as HTMLInputElement).checked).catch((err) => ({ ...mcp, error: errText(err) }));

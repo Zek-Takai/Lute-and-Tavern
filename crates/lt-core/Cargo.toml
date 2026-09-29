@@ -5,6 +5,9 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
+claxon = "0.4.3"
+flacenc = "0.5.1"
+hound = "3.5.1"
 lofty = "0.25.4"
 mime_guess = "2.0.5"
 reqwest = { version = "0.13.5", features = ["blocking", "json"] }

@@ -26,10 +26,27 @@ pub const SIDECAR: &str = "song.json";
 
 /// A file or folder name that is safe on macOS, Windows and Linux.
 pub fn clean_name(s: &str) -> String {
-    let replaced: String = s.chars().map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() { ' ' } else { c }).collect();
+    let replaced: String = s
+        .chars()
+        .map(|c| {
+            if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
     let squeezed = replaced.split_whitespace().collect::<Vec<_>>().join(" ");
-    let trimmed: String = squeezed.trim_matches(|c: char| c == '.' || c == ' ').chars().take(100).collect();
-    if trimmed.is_empty() { "Untitled".into() } else { trimmed }
+    let trimmed: String = squeezed
+        .trim_matches(|c: char| c == '.' || c == ' ')
+        .chars()
+        .take(100)
+        .collect();
+    if trimmed.is_empty() {
+        "Untitled".into()
+    } else {
+        trimmed
+    }
 }
 
 /// Where a file sits inside the library folder.
@@ -48,17 +65,32 @@ pub enum Place {
 }
 
 pub fn place_of(root: &Path, path: &Path) -> Place {
-    let Ok(rel) = path.strip_prefix(root) else { return Place::Loose };
+    let Ok(rel) = path.strip_prefix(root) else {
+        return Place::Loose;
+    };
     let parts: Vec<&str> = rel.iter().filter_map(|s| s.to_str()).collect();
     match parts.as_slice() {
         [s, dir, file] if *s == SONGS => {
-            if tags::stem_of(Path::new(file)).is_some() { Place::Loose } else { Place::Main(root.join(SONGS).join(dir)) }
+            if tags::stem_of(Path::new(file)).is_some() {
+                Place::Loose
+            } else {
+                Place::Main(root.join(SONGS).join(dir))
+            }
         }
         [s, dir, sub, file] if *s == SONGS && sub.eq_ignore_ascii_case("stems") => {
-            let name = Path::new(file).file_stem().and_then(|n| n.to_str()).unwrap_or("Part").to_string();
+            let name = Path::new(file)
+                .file_stem()
+                .and_then(|n| n.to_str())
+                .unwrap_or("Part")
+                .to_string();
             Place::Stem(root.join(SONGS).join(dir), name)
         }
-        [s, _, sub, ..] if *s == SONGS && (sub.eq_ignore_ascii_case("takes") || sub.eq_ignore_ascii_case("sheets")) => Place::Extra,
+        [s, _, sub, ..]
+            if *s == SONGS
+                && (sub.eq_ignore_ascii_case("takes") || sub.eq_ignore_ascii_case("sheets")) =>
+        {
+            Place::Extra
+        }
         [a, _, _, _] if *a == ALBUMS => Place::Album,
         _ => Place::Loose,
     }
@@ -68,7 +100,9 @@ pub fn place_of(root: &Path, path: &Path) -> Place {
 fn settled(path: &Path) -> bool {
     std::fs::metadata(path)
         .and_then(|m| m.modified())
-        .map(|t| SystemTime::now().duration_since(t).unwrap_or_default() >= Duration::from_millis(1500))
+        .map(|t| {
+            SystemTime::now().duration_since(t).unwrap_or_default() >= Duration::from_millis(1500)
+        })
         .unwrap_or(false)
 }
 
@@ -76,10 +110,20 @@ fn free_path(target: &Path) -> PathBuf {
     if !target.exists() {
         return target.to_path_buf();
     }
-    let stem = target.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
-    let ext = target.extension().and_then(|e| e.to_str()).map(|e| format!(".{e}")).unwrap_or_default();
+    let stem = target
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("file");
+    let ext = target
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| format!(".{e}"))
+        .unwrap_or_default();
     let dir = target.parent().unwrap_or(Path::new(""));
-    (2..).map(|i| dir.join(format!("{stem} ({i}){ext}"))).find(|c| !c.exists()).expect("unbounded range")
+    (2..)
+        .map(|i| dir.join(format!("{stem} ({i}){ext}")))
+        .find(|c| !c.exists())
+        .expect("unbounded range")
 }
 
 /// Moves a file, falling back to copy-and-delete across drives. Never overwrites.
@@ -89,7 +133,8 @@ pub fn move_file(from: &Path, to: &Path) -> Result<PathBuf> {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
     if std::fs::rename(from, &to).is_err() {
-        std::fs::copy(from, &to).with_context(|| format!("copying {} to {}", from.display(), to.display()))?;
+        std::fs::copy(from, &to)
+            .with_context(|| format!("copying {} to {}", from.display(), to.display()))?;
         std::fs::remove_file(from).with_context(|| format!("removing {}", from.display()))?;
     }
     Ok(to)
@@ -98,14 +143,22 @@ pub fn move_file(from: &Path, to: &Path) -> Result<PathBuf> {
 /// Removes folders left empty by moves, never the library folder or its Songs/Albums folders.
 fn prune_empty_dirs(root: &Path) {
     let keep = [root.to_path_buf(), root.join(SONGS), root.join(ALBUMS)];
-    let mut dirs: Vec<PathBuf> = walkdir::WalkDir::new(root).into_iter().filter_map(|e| e.ok()).filter(|e| e.file_type().is_dir()).map(|e| e.into_path()).collect();
+    let mut dirs: Vec<PathBuf> = walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_dir())
+        .map(|e| e.into_path())
+        .collect();
     dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
     for d in dirs {
         if keep.contains(&d) {
             continue;
         }
         let only_junk = std::fs::read_dir(&d)
-            .map(|rd| rd.filter_map(|e| e.ok()).all(|e| e.file_name() == ".DS_Store"))
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .all(|e| e.file_name() == ".DS_Store")
+            })
             .unwrap_or(false);
         if only_junk {
             let _ = std::fs::remove_file(d.join(".DS_Store"));
@@ -124,34 +177,71 @@ impl Library {
     pub fn set_library_folder(&self, path: &Path) -> Result<Folder> {
         std::fs::create_dir_all(path).with_context(|| format!("creating {}", path.display()))?;
         let f = self.add_folder(path)?;
-        self.db().execute("UPDATE folders SET managed = (id = ?1)", [f.id])?;
+        self.db()
+            .execute("UPDATE folders SET managed = (id = ?1)", [f.id])?;
         Ok(Folder { managed: true, ..f })
     }
 
     pub(crate) fn managed_root(&self, folder_id: Option<i64>) -> Option<PathBuf> {
         let id = folder_id?;
-        self.db().query_row("SELECT path FROM folders WHERE id = ?1 AND managed = 1", [id], |r| r.get::<_, String>(0)).optional().ok()?.map(PathBuf::from)
+        self.db()
+            .query_row(
+                "SELECT path FROM folders WHERE id = ?1 AND managed = 1",
+                [id],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+            .ok()?
+            .map(PathBuf::from)
     }
 
     /// The Songs/<Title> folder for a song. A folder already holding a different song of the same
     /// title gets the artist added to the name.
-    pub(crate) fn song_dir_for(&self, root: &Path, title: &str, artist: &str, me: Option<i64>) -> Result<PathBuf> {
+    pub(crate) fn song_dir_for(
+        &self,
+        root: &Path,
+        title: &str,
+        artist: &str,
+        me: Option<i64>,
+    ) -> Result<PathBuf> {
         let songs = root.join(SONGS);
         let unknown = |a: &str| a.is_empty() || a == "Unknown artist";
-        let candidates = [clean_name(title), clean_name(&format!("{title} ({artist})"))];
-        for (i, name) in candidates.iter().chain((2..50).map(|n| format!("{} ({n})", clean_name(title))).collect::<Vec<_>>().iter()).enumerate() {
+        let candidates = [
+            clean_name(title),
+            clean_name(&format!("{title} ({artist})")),
+        ];
+        for (i, name) in candidates
+            .iter()
+            .chain(
+                (2..50)
+                    .map(|n| format!("{} ({n})", clean_name(title)))
+                    .collect::<Vec<_>>()
+                    .iter(),
+            )
+            .enumerate()
+        {
             if i == 1 && unknown(artist) {
                 continue;
             }
             let dir = songs.join(name);
             let owner: Option<(i64, String, String)> = self
                 .db()
-                .query_row("SELECT id, title, artist FROM songs WHERE song_dir = ?1", [dir.to_string_lossy()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .query_row(
+                    "SELECT id, title, artist FROM songs WHERE song_dir = ?1",
+                    [dir.to_string_lossy()],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
                 .optional()?;
             match owner {
                 None => return Ok(dir),
                 Some((id, _, _)) if Some(id) == me => return Ok(dir),
-                Some((_, t, a)) if t.eq_ignore_ascii_case(title) && (a == artist || unknown(&a) || unknown(artist)) && me.is_none() => return Ok(dir),
+                Some((_, t, a))
+                    if t.eq_ignore_ascii_case(title)
+                        && (a == artist || unknown(&a) || unknown(artist))
+                        && me.is_none() =>
+                {
+                    return Ok(dir);
+                }
                 _ => continue,
             }
         }
@@ -182,7 +272,10 @@ impl Library {
             .map(|e| e.into_path())
             .filter(|p| {
                 let rel = p.strip_prefix(&root).unwrap_or(p);
-                !rel.iter().any(|c| c.to_str().is_some_and(|s| s.starts_with('.'))) && place_of(&root, p) == Place::Loose && (!wait_for_writes || settled(p))
+                !rel.iter()
+                    .any(|c| c.to_str().is_some_and(|s| s.starts_with('.')))
+                    && place_of(&root, p) == Place::Loose
+                    && (!wait_for_writes || settled(p))
             })
             .collect();
         // Whole songs first so their folders exist before their stems arrive.
@@ -190,32 +283,64 @@ impl Library {
         loose.sort_by_key(|p| (tags::stem_of(p).is_some(), p.clone()));
         let mut moved = 0;
         for p in loose {
-            let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("mp3").to_ascii_lowercase();
+            let ext = p
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("mp3")
+                .to_ascii_lowercase();
             let (target, song_dir) = if let Some((base, name)) = tags::stem_of(&p) {
                 let dir = self.song_dir_for(&root, &base, "", None)?;
-                (dir.join("stems").join(format!("{}.{ext}", clean_name(&name))), None)
+                (
+                    dir.join("stems")
+                        .join(format!("{}.{ext}", clean_name(&name))),
+                    None,
+                )
             } else {
                 // Tags only: folder names around a loose file are not an album.
                 let info = tags::read_track(&p, None);
                 let album = info.album.trim();
                 if !album.is_empty() && !album.to_lowercase().ends_with(" stems") {
                     let n = info.track.map(|t| format!("{t:02} - ")).unwrap_or_default();
-                    let album_artist = if info.album_artist.is_empty() { &info.artist } else { &info.album_artist };
-                    let f = root.join(ALBUMS).join(clean_name(album_artist)).join(clean_name(album)).join(format!("{n}{}.{ext}", clean_name(&info.title)));
+                    let album_artist = if info.album_artist.is_empty() {
+                        &info.artist
+                    } else {
+                        &info.album_artist
+                    };
+                    let f = root
+                        .join(ALBUMS)
+                        .join(clean_name(album_artist))
+                        .join(clean_name(album))
+                        .join(format!("{n}{}.{ext}", clean_name(&info.title)));
                     (f, None)
                 } else {
                     let dir = self.song_dir_for(&root, &info.title, &info.artist, None)?;
-                    (dir.join(format!("{}.{ext}", clean_name(&info.title))), Some(dir))
+                    (
+                        dir.join(format!("{}.{ext}", clean_name(&info.title))),
+                        Some(dir),
+                    )
                 }
             };
             if target == p {
                 continue;
             }
             let new = move_file(&p, &target)?;
-            let (old_s, new_s) = (p.to_string_lossy().to_string(), new.to_string_lossy().to_string());
+            let (old_s, new_s) = (
+                p.to_string_lossy().to_string(),
+                new.to_string_lossy().to_string(),
+            );
             let db = self.db();
-            db.execute("UPDATE songs SET path = ?2, song_dir = COALESCE(?3, song_dir) WHERE path = ?1", params![old_s, new_s, song_dir.map(|d| d.to_string_lossy().to_string())])?;
-            db.execute("UPDATE stems SET path = ?2 WHERE path = ?1", params![old_s, new_s])?;
+            db.execute(
+                "UPDATE songs SET path = ?2, song_dir = COALESCE(?3, song_dir) WHERE path = ?1",
+                params![
+                    old_s,
+                    new_s,
+                    song_dir.map(|d| d.to_string_lossy().to_string())
+                ],
+            )?;
+            db.execute(
+                "UPDATE stems SET path = ?2 WHERE path = ?1",
+                params![old_s, new_s],
+            )?;
             moved += 1;
         }
         if moved > 0 {
@@ -227,11 +352,20 @@ impl Library {
     /// Finds or creates the song a song folder belongs to (used for stems in `Songs/<Title>/stems/`).
     pub(crate) fn song_for_dir(&self, dir: &Path, folder_id: Option<i64>) -> Result<(i64, bool)> {
         let d = dir.to_string_lossy().to_string();
-        let found: Option<i64> = self.db().query_row("SELECT id FROM songs WHERE song_dir = ?1", [&d], |r| r.get(0)).optional()?;
+        let found: Option<i64> = self
+            .db()
+            .query_row("SELECT id FROM songs WHERE song_dir = ?1", [&d], |r| {
+                r.get(0)
+            })
+            .optional()?;
         if let Some(id) = found {
             return Ok((id, false));
         }
-        let title = dir.file_name().and_then(|n| n.to_str()).unwrap_or("Untitled").to_string();
+        let title = dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("Untitled")
+            .to_string();
         let t = now();
         let id = {
             let db = self.db();
@@ -247,10 +381,20 @@ impl Library {
 
     /// When a song folder's own file is imported, a song already made for that folder (from its stems,
     /// or by the songwriter) takes the file instead of a second song appearing.
-    pub(crate) fn adopt_main_file(&self, dir: &Path, path: &Path, mtime: Option<i64>, duration: Option<f64>) -> Result<Option<i64>> {
+    pub(crate) fn adopt_main_file(
+        &self,
+        dir: &Path,
+        path: &Path,
+        mtime: Option<i64>,
+        duration: Option<f64>,
+    ) -> Result<Option<i64>> {
         let db = self.db();
         let owner: Option<i64> = db
-            .query_row("SELECT id FROM songs WHERE song_dir = ?1 AND path IS NULL", [dir.to_string_lossy()], |r| r.get(0))
+            .query_row(
+                "SELECT id FROM songs WHERE song_dir = ?1 AND path IS NULL",
+                [dir.to_string_lossy()],
+                |r| r.get(0),
+            )
             .optional()?;
         if let Some(id) = owner {
             db.execute(
@@ -263,33 +407,56 @@ impl Library {
 
     /// Gives a songwriter song its folder in the library once it has a title.
     pub fn ensure_song_dir(&self, id: i64) -> Result<Option<PathBuf>> {
-        let (dir, title, artist): (Option<String>, String, String) =
-            self.db().query_row("SELECT song_dir, title, artist FROM songs WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        let (dir, title, artist): (Option<String>, String, String) = self.db().query_row(
+            "SELECT song_dir, title, artist FROM songs WHERE id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )?;
         if let Some(d) = dir {
             return Ok(Some(PathBuf::from(d)));
         }
-        let Some(lib) = self.library_folder()? else { return Ok(None) };
+        let Some(lib) = self.library_folder()? else {
+            return Ok(None);
+        };
         let root = PathBuf::from(&lib.path);
         let d = self.song_dir_for(&root, &title, &artist, Some(id))?;
         std::fs::create_dir_all(&d)?;
-        self.db().execute("UPDATE songs SET song_dir = ?2, folder_id = COALESCE(folder_id, ?3) WHERE id = ?1", params![id, d.to_string_lossy(), lib.id])?;
+        self.db().execute(
+            "UPDATE songs SET song_dir = ?2, folder_id = COALESCE(folder_id, ?3) WHERE id = ?1",
+            params![id, d.to_string_lossy(), lib.id],
+        )?;
         self.write_sidecar(id)?;
         Ok(Some(d))
     }
 
     /// Renames a song's folder and file after its title or artist changes, keeping every stored path right.
     pub fn relocate(&self, id: i64) -> Result<()> {
-        let (dir, path, title, artist, folder_id): (Option<String>, Option<String>, String, String, Option<i64>) = self
-            .db()
-            .query_row("SELECT song_dir, path, title, artist, folder_id FROM songs WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?;
-        let Some(root) = self.managed_root(folder_id) else { return Ok(()) };
-        let Some(dir) = dir.map(PathBuf::from) else { return Ok(()) };
+        let (dir, path, title, artist, folder_id): (
+            Option<String>,
+            Option<String>,
+            String,
+            String,
+            Option<i64>,
+        ) = self.db().query_row(
+            "SELECT song_dir, path, title, artist, folder_id FROM songs WHERE id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )?;
+        let Some(root) = self.managed_root(folder_id) else {
+            return Ok(());
+        };
+        let Some(dir) = dir.map(PathBuf::from) else {
+            return Ok(());
+        };
         let want = self.song_dir_for(&root, &title, &artist, Some(id))?;
         let mut dir_now = dir.clone();
         if want != dir && dir.exists() {
             let want = free_path(&want);
             std::fs::rename(&dir, &want).with_context(|| format!("renaming {}", dir.display()))?;
-            let (old, new) = (dir.to_string_lossy().to_string(), want.to_string_lossy().to_string());
+            let (old, new) = (
+                dir.to_string_lossy().to_string(),
+                want.to_string_lossy().to_string(),
+            );
             let db = self.db();
             for table in ["songs", "stems", "takes", "sheets"] {
                 db.execute(&format!("UPDATE {table} SET path = ?2 || substr(path, length(?1) + 1) WHERE path LIKE ?1 || '/%'"), params![old, new])?;
@@ -299,19 +466,24 @@ impl Library {
         }
         // The song's own file follows its title.
         let path: Option<String> = if dir_now != dir {
-            self.db().query_row("SELECT path FROM songs WHERE id = ?1", [id], |r| r.get(0))?
+            self.db()
+                .query_row("SELECT path FROM songs WHERE id = ?1", [id], |r| r.get(0))?
         } else {
             path
         };
         if let Some(p) = path.map(PathBuf::from)
-            && p.parent() == Some(dir_now.as_path()) {
-                let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("mp3");
-                let target = dir_now.join(format!("{}.{ext}", clean_name(&title)));
-                if target != p && p.exists() {
-                    let new = move_file(&p, &target)?;
-                    self.db().execute("UPDATE songs SET path = ?2 WHERE id = ?1", params![id, new.to_string_lossy()])?;
-                }
+            && p.parent() == Some(dir_now.as_path())
+        {
+            let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("mp3");
+            let target = dir_now.join(format!("{}.{ext}", clean_name(&title)));
+            if target != p && p.exists() {
+                let new = move_file(&p, &target)?;
+                self.db().execute(
+                    "UPDATE songs SET path = ?2 WHERE id = ?1",
+                    params![id, new.to_string_lossy()],
+                )?;
             }
+        }
         self.write_sidecar(id)
     }
 
@@ -329,14 +501,25 @@ impl Library {
 
     /// Copies the song's artwork into its folder as cover.<ext>.
     pub(crate) fn write_cover(&self, id: i64) -> Result<()> {
-        let (dir, art): (Option<String>, Option<String>) = self.db().query_row("SELECT song_dir, art FROM songs WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))?;
-        let (Some(dir), Some(art)) = (dir, art) else { return Ok(()) };
-        let Some(src) = self.art_path(&art) else { return Ok(()) };
+        let (dir, art): (Option<String>, Option<String>) =
+            self.db()
+                .query_row("SELECT song_dir, art FROM songs WHERE id = ?1", [id], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })?;
+        let (Some(dir), Some(art)) = (dir, art) else {
+            return Ok(());
+        };
+        let Some(src) = self.art_path(&art) else {
+            return Ok(());
+        };
         let dir = PathBuf::from(dir);
         if !dir.exists() {
             return Ok(());
         }
-        for old in std::fs::read_dir(&dir)?.filter_map(|e| e.ok()).map(|e| e.path()) {
+        for old in std::fs::read_dir(&dir)?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+        {
             if old.file_stem().and_then(|s| s.to_str()) == Some("cover") {
                 let _ = std::fs::remove_file(old);
             }
@@ -348,8 +531,14 @@ impl Library {
 
     /// Writes song.json: everything the app knows about the song, so the folder stands on its own.
     pub fn write_sidecar(&self, id: i64) -> Result<()> {
-        let dir: Option<String> = self.db().query_row("SELECT song_dir FROM songs WHERE id = ?1", [id], |r| r.get(0))?;
-        let Some(dir) = dir.map(PathBuf::from) else { return Ok(()) };
+        let dir: Option<String> =
+            self.db()
+                .query_row("SELECT song_dir FROM songs WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })?;
+        let Some(dir) = dir.map(PathBuf::from) else {
+            return Ok(());
+        };
         if !dir.exists() {
             return Ok(());
         }
@@ -382,10 +571,20 @@ impl Library {
 
     /// Restores what a song.json knows when a song folder arrives (for example copied from another Mac).
     pub(crate) fn read_sidecar(&self, id: i64) -> Result<()> {
-        let dir: Option<String> = self.db().query_row("SELECT song_dir FROM songs WHERE id = ?1", [id], |r| r.get(0))?;
-        let Some(file) = dir.map(|d| PathBuf::from(d).join(SIDECAR)) else { return Ok(()) };
-        let Ok(text) = std::fs::read_to_string(&file) else { return Ok(()) };
-        let Ok(v) = serde_json::from_str::<Value>(&text) else { return Ok(()) };
+        let dir: Option<String> =
+            self.db()
+                .query_row("SELECT song_dir FROM songs WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })?;
+        let Some(file) = dir.map(|d| PathBuf::from(d).join(SIDECAR)) else {
+            return Ok(());
+        };
+        let Ok(text) = std::fs::read_to_string(&file) else {
+            return Ok(());
+        };
+        let Ok(v) = serde_json::from_str::<Value>(&text) else {
+            return Ok(());
+        };
         let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
         let genre = self.ensure_genre(&s("genre"), "file")?;
         let source = if s("source") == "ai" { "ai" } else { "library" };
@@ -409,10 +608,19 @@ impl Library {
             )?;
         }
         for m in v["conversation"].as_array().into_iter().flatten() {
-            let role = if m["role"].as_str() == Some("user") { "user" } else { "writer" };
+            let role = if m["role"].as_str() == Some("user") {
+                "user"
+            } else {
+                "writer"
+            };
             db.execute(
                 "INSERT INTO messages(song_id, role, text, created_at) VALUES (?1, ?2, ?3, ?4)",
-                params![id, role, m["text"].as_str().unwrap_or(""), m["createdAt"].as_i64().unwrap_or(0)],
+                params![
+                    id,
+                    role,
+                    m["text"].as_str().unwrap_or(""),
+                    m["createdAt"].as_i64().unwrap_or(0)
+                ],
             )?;
         }
         Ok(())
@@ -428,7 +636,8 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, b"x").unwrap();
         let f = std::fs::File::options().write(true).open(path).unwrap();
-        f.set_modified(SystemTime::now() - Duration::from_secs(60)).unwrap();
+        f.set_modified(SystemTime::now() - Duration::from_secs(60))
+            .unwrap();
     }
 
     #[test]
@@ -437,7 +646,11 @@ mod tests {
         let l = Library::open(&tmp.path().join("data")).unwrap();
         let lib = tmp.path().join("Library");
         let stems = lib.join("Every Leaf Is Listening Stems");
-        for f in ["Every Leaf Is Listening (Vocals).wav", "Every Leaf Is Listening (Vocals).mp3", "Every Leaf Is Listening (Drums).mp3"] {
+        for f in [
+            "Every Leaf Is Listening (Vocals).wav",
+            "Every Leaf Is Listening (Vocals).mp3",
+            "Every Leaf Is Listening (Drums).mp3",
+        ] {
             old_file(&stems.join(f));
         }
         old_file(&lib.join("Every Leaf Is Listening.m4a"));
@@ -451,23 +664,45 @@ mod tests {
         assert!(dir.join("stems/Vocals.mp3").is_file());
         assert!(dir.join("stems/Drums.mp3").is_file());
         assert!(dir.join("song.json").is_file());
-        assert!(!root.join("Every Leaf Is Listening Stems").exists(), "the emptied stems folder is removed");
+        assert!(
+            !root.join("Every Leaf Is Listening Stems").exists(),
+            "the emptied stems folder is removed"
+        );
 
         let songs = l.songs().unwrap();
         assert_eq!(songs.len(), 1);
         assert_eq!((songs[0].stems, songs[0].has_file), (3, true));
-        assert_eq!(l.scan_folder(&f).unwrap().added, 0, "a second scan changes nothing");
+        assert_eq!(
+            l.scan_folder(&f).unwrap().added,
+            0,
+            "a second scan changes nothing"
+        );
 
         // Renaming the song renames its folder and file; every stored path follows.
-        l.update_song(songs[0].id, &SongPatch { title: Some("Every Leaf".into()), ..Default::default() }).unwrap();
+        l.update_song(
+            songs[0].id,
+            &SongPatch {
+                title: Some("Every Leaf".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let dir2 = root.join("Songs/Every Leaf");
         assert!(dir2.join("Every Leaf.m4a").is_file());
         assert!(dir2.join("stems/Drums.mp3").is_file());
         assert!(!dir.exists());
-        assert_eq!(l.audio_path(songs[0].id).unwrap().unwrap(), dir2.join("Every Leaf.m4a"));
-        let json: Value = serde_json::from_str(&std::fs::read_to_string(dir2.join("song.json")).unwrap()).unwrap();
+        assert_eq!(
+            l.audio_path(songs[0].id).unwrap().unwrap(),
+            dir2.join("Every Leaf.m4a")
+        );
+        let json: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir2.join("song.json")).unwrap())
+                .unwrap();
         assert_eq!(json["title"], "Every Leaf");
-        assert!(l.delete_song(songs[0].id).is_err(), "library songs are removed by moving their folder");
+        assert!(
+            l.delete_song(songs[0].id).is_err(),
+            "library songs are removed by moving their folder"
+        );
         assert_eq!(l.scan_folder(&f).unwrap().added, 0);
     }
 
@@ -477,17 +712,27 @@ mod tests {
         let l = Library::open(&tmp.path().join("data")).unwrap();
         let f = l.set_library_folder(&tmp.path().join("Library")).unwrap();
         let s = l.create_request("a sea shanty", None, "Bard").unwrap();
-        let d = crate::Draft { title: "Salt and Rope".into(), lyrics: "[Chorus]\nHeave".into(), style: "shanty".into(), ..Default::default() };
+        let d = crate::Draft {
+            title: "Salt and Rope".into(),
+            lyrics: "[Chorus]\nHeave".into(),
+            style: "shanty".into(),
+            ..Default::default()
+        };
         l.apply_draft(s.id, &d, "First draft", false).unwrap();
         let dir = PathBuf::from(&f.path).join("Songs/Salt and Rope");
-        let json: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("song.json")).unwrap()).unwrap();
+        let json: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("song.json")).unwrap()).unwrap();
         assert_eq!(json["suno"]["lyrics"], "[Chorus]\nHeave");
         assert_eq!(json["conversation"][0]["text"], "a sea shanty");
         let take = tmp.path().join("take.mp3");
         std::fs::write(&take, b"x").unwrap();
         l.add_take(s.id, &take, "from Suno").unwrap();
         assert!(dir.join("takes/take.mp3").is_file());
-        assert_eq!(l.scan_folder(&f).unwrap().added, 0, "takes are not songs of their own");
+        assert_eq!(
+            l.scan_folder(&f).unwrap().added,
+            0,
+            "takes are not songs of their own"
+        );
         assert_eq!(l.songs().unwrap().len(), 1);
     }
 
@@ -503,7 +748,15 @@ mod tests {
         l.scan_folder(&f).unwrap();
         let songs = l.songs().unwrap();
         assert_eq!(songs.len(), 1);
-        assert_eq!((songs[0].title.as_str(), songs[0].genre.as_str(), songs[0].source.as_str(), songs[0].lyrics.as_str()), ("Old Tune", "Folk", "ai", "la la"));
+        assert_eq!(
+            (
+                songs[0].title.as_str(),
+                songs[0].genre.as_str(),
+                songs[0].source.as_str(),
+                songs[0].lyrics.as_str()
+            ),
+            ("Old Tune", "Folk", "ai", "la la")
+        );
         assert_eq!(l.song_detail(songs[0].id).unwrap().versions.len(), 1);
     }
 
@@ -511,18 +764,36 @@ mod tests {
     fn names_are_safe() {
         assert_eq!(clean_name("AC/DC: Live?"), "AC DC Live");
         assert_eq!(clean_name("  ..  "), "Untitled");
-        assert_eq!(clean_name("Every Leaf Is Listening"), "Every Leaf Is Listening");
+        assert_eq!(
+            clean_name("Every Leaf Is Listening"),
+            "Every Leaf Is Listening"
+        );
     }
 
     #[test]
     fn places() {
         let r = Path::new("/lib");
-        assert_eq!(place_of(r, Path::new("/lib/Songs/A/A.mp3")), Place::Main(r.join("Songs/A")));
-        assert_eq!(place_of(r, Path::new("/lib/Songs/A/stems/Vocals.wav")), Place::Stem(r.join("Songs/A"), "Vocals".into()));
-        assert_eq!(place_of(r, Path::new("/lib/Songs/A/takes/t.mp3")), Place::Extra);
-        assert_eq!(place_of(r, Path::new("/lib/Albums/X/Y/01 - Z.mp3")), Place::Album);
+        assert_eq!(
+            place_of(r, Path::new("/lib/Songs/A/A.mp3")),
+            Place::Main(r.join("Songs/A"))
+        );
+        assert_eq!(
+            place_of(r, Path::new("/lib/Songs/A/stems/Vocals.wav")),
+            Place::Stem(r.join("Songs/A"), "Vocals".into())
+        );
+        assert_eq!(
+            place_of(r, Path::new("/lib/Songs/A/takes/t.mp3")),
+            Place::Extra
+        );
+        assert_eq!(
+            place_of(r, Path::new("/lib/Albums/X/Y/01 - Z.mp3")),
+            Place::Album
+        );
         assert_eq!(place_of(r, Path::new("/lib/A (Vocals).wav")), Place::Loose);
-        assert_eq!(place_of(r, Path::new("/lib/Songs/A/A (Vocals).wav")), Place::Loose);
+        assert_eq!(
+            place_of(r, Path::new("/lib/Songs/A/A (Vocals).wav")),
+            Place::Loose
+        );
         assert_eq!(place_of(r, Path::new("/lib/new.mp3")), Place::Loose);
     }
 }

@@ -2,16 +2,86 @@
 
 /// ID3v1 genre table (indices 0-79), used when a tag stores a number such as "(17)".
 const ID3: [&str; 80] = [
-    "Blues", "Classic Rock", "Country", "Dance", "Disco", "Funk", "Grunge", "Hip-Hop", "Jazz", "Metal",
-    "New Age", "Oldies", "Other", "Pop", "R&B", "Rap", "Reggae", "Rock", "Techno", "Industrial",
-    "Alternative", "Ska", "Death Metal", "Pranks", "Soundtrack", "Euro-Techno", "Ambient", "Trip-Hop",
-    "Vocal", "Jazz+Funk", "Fusion", "Trance", "Classical", "Instrumental", "Acid", "House", "Game",
-    "Sound Clip", "Gospel", "Noise", "Alternative Rock", "Bass", "Soul", "Punk", "Space", "Meditative",
-    "Instrumental Pop", "Instrumental Rock", "Ethnic", "Gothic", "Darkwave", "Techno-Industrial",
-    "Electronic", "Pop-Folk", "Eurodance", "Dream", "Southern Rock", "Comedy", "Cult", "Gangsta",
-    "Top 40", "Christian Rap", "Pop/Funk", "Jungle", "Native American", "Cabaret", "New Wave",
-    "Psychedelic", "Rave", "Showtunes", "Trailer", "Lo-Fi", "Tribal", "Acid Punk", "Acid Jazz", "Polka",
-    "Retro", "Musical", "Rock & Roll", "Hard Rock",
+    "Blues",
+    "Classic Rock",
+    "Country",
+    "Dance",
+    "Disco",
+    "Funk",
+    "Grunge",
+    "Hip-Hop",
+    "Jazz",
+    "Metal",
+    "New Age",
+    "Oldies",
+    "Other",
+    "Pop",
+    "R&B",
+    "Rap",
+    "Reggae",
+    "Rock",
+    "Techno",
+    "Industrial",
+    "Alternative",
+    "Ska",
+    "Death Metal",
+    "Pranks",
+    "Soundtrack",
+    "Euro-Techno",
+    "Ambient",
+    "Trip-Hop",
+    "Vocal",
+    "Jazz+Funk",
+    "Fusion",
+    "Trance",
+    "Classical",
+    "Instrumental",
+    "Acid",
+    "House",
+    "Game",
+    "Sound Clip",
+    "Gospel",
+    "Noise",
+    "Alternative Rock",
+    "Bass",
+    "Soul",
+    "Punk",
+    "Space",
+    "Meditative",
+    "Instrumental Pop",
+    "Instrumental Rock",
+    "Ethnic",
+    "Gothic",
+    "Darkwave",
+    "Techno-Industrial",
+    "Electronic",
+    "Pop-Folk",
+    "Eurodance",
+    "Dream",
+    "Southern Rock",
+    "Comedy",
+    "Cult",
+    "Gangsta",
+    "Top 40",
+    "Christian Rap",
+    "Pop/Funk",
+    "Jungle",
+    "Native American",
+    "Cabaret",
+    "New Wave",
+    "Psychedelic",
+    "Rave",
+    "Showtunes",
+    "Trailer",
+    "Lo-Fi",
+    "Tribal",
+    "Acid Punk",
+    "Acid Jazz",
+    "Polka",
+    "Retro",
+    "Musical",
+    "Rock & Roll",
+    "Hard Rock",
 ];
 
 pub const UNSORTED: &str = "Unsorted";
@@ -28,13 +98,27 @@ pub fn normalize(raw: &str) -> String {
             g = if !tail.is_empty() {
                 tail.to_string()
             } else {
-                num.parse::<usize>().ok().and_then(|i| ID3.get(i)).map(|s| s.to_string()).unwrap_or_default()
+                num.parse::<usize>()
+                    .ok()
+                    .and_then(|i| ID3.get(i))
+                    .map(|s| s.to_string())
+                    .unwrap_or_default()
             };
         }
     } else if !g.is_empty() && g.chars().all(|c| c.is_ascii_digit()) {
-        g = g.parse::<usize>().ok().and_then(|i| ID3.get(i)).map(|s| s.to_string()).unwrap_or_default();
+        g = g
+            .parse::<usize>()
+            .ok()
+            .and_then(|i| ID3.get(i))
+            .map(|s| s.to_string())
+            .unwrap_or_default();
     }
-    let g = g.split([';', '/', '\0']).next().unwrap_or("").trim().to_string();
+    let g = g
+        .split([';', '/', '\0'])
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if g.is_empty() {
         return UNSORTED.to_string();
     }

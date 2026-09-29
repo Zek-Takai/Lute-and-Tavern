@@ -75,6 +75,15 @@
   </div>
 </dialog>
 
+<dialog id="flacAsk" aria-labelledby="flacTitle">
+  <form class="reqform" method="dialog">
+    <h2 id="flacTitle">Store WAV stems as FLAC?</h2>
+    <p class="muted small" style="margin:0"><span id="flacCount"></span> FLAC keeps exactly the same sound in about half the space. Keep WAV if you plan to open the stems in an app that can't read FLAC, such as Logic Pro or GarageBand. Your original files are never changed.</p>
+    <label class="row small"><input type="checkbox" id="flacRemember"> Remember my choice (change it later in Settings › Stems)</label>
+    <div class="row" style="justify-content:flex-end"><button class="btn" value="wav">Keep WAV</button><button class="btn primary" value="flac">Convert to FLAC</button></div>
+  </form>
+</dialog>
+
 <dialog id="set" aria-labelledby="setTitle">
   <div class="reqform settings" id="setBody"></div>
 </dialog>

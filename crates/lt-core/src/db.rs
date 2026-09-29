@@ -151,7 +151,10 @@ pub fn open_in_memory() -> Result<Connection> {
 fn migrate(conn: &Connection) -> Result<()> {
     let current: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
     for (i, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
-        conn.execute_batch(&format!("BEGIN; {sql} PRAGMA user_version = {}; COMMIT;", i + 1))?;
+        conn.execute_batch(&format!(
+            "BEGIN; {sql} PRAGMA user_version = {}; COMMIT;",
+            i + 1
+        ))?;
     }
     Ok(())
 }

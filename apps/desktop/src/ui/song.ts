@@ -3,12 +3,30 @@ import { open as pickFile } from '@tauri-apps/plugin-dialog';
 import { api, errText, lt, type SongDetail } from '../api';
 import { keyName } from '../music/notation';
 import { pickStems, playing, playSong, playStems, playTake, setStemMix, stemMix, stop, syncIcons } from '../player';
-import { byId, playable, reload, rerender, state, visible, writerName } from '../state';
+import { byId, playable, reload, rerender, saveSetting, state, visible, writerName } from '../state';
 import { $, copyText, date, esc, PLAY, toast } from '../util';
 import { sourceBadge, STATUS } from './library';
 import { renderSheet, resetSheet } from './sheet';
 
 const STEM_BUTTONS = `<button class="btn" data-attach="folder">Attach a stems folder…</button><button class="btn" data-attach="files">Attach stem files…</button>`;
+
+/** Whether WAV stems should be stored as FLAC: the saved choice, or ask (with "remember"). Null when cancelled. */
+async function chooseFlac(paths: string[]): Promise<boolean | null> {
+  const pref = (state.settings.stemsFlac as string) || 'ask';
+  if (pref !== 'ask') return pref === 'always';
+  const wavs = await api.stemsWavCount(paths);
+  if (!wavs) return false;
+  const d = $<HTMLDialogElement>('#flacAsk');
+  $('#flacCount').textContent = `${wavs} of these stem${wavs === 1 ? ' is a WAV file' : 's are WAV files'}.`;
+  $<HTMLInputElement>('#flacRemember').checked = false;
+  d.returnValue = '';
+  d.showModal();
+  await new Promise((r) => d.addEventListener('close', r, { once: true }));
+  if (d.returnValue !== 'flac' && d.returnValue !== 'wav') return null;
+  const flac = d.returnValue === 'flac';
+  if ($<HTMLInputElement>('#flacRemember').checked) await saveSetting('stemsFlac', flac ? 'always' : 'never');
+  return flac;
+}
 
 /** Wires the attach-stems buttons: every audio file picked (or inside the folder picked) becomes a part of this song. */
 function wireAttachStems(b: HTMLElement, s: SongDetail, afterChange: () => Promise<void>) {
@@ -18,7 +36,9 @@ function wireAttachStems(b: HTMLElement, s: SongDetail, afterChange: () => Promi
     const paths = picked == null ? [] : Array.isArray(picked) ? picked : [picked];
     if (!paths.length) return;
     try {
-      const n = await api.attachStems(s.id, paths);
+      const toFlac = await chooseFlac(paths);
+      if (toFlac == null) return;
+      const n = await api.attachStems(s.id, paths, toFlac);
       await afterChange();
       toast(`${n} stem${n === 1 ? '' : 's'} attached to "${s.title}"`);
     } catch (e) {

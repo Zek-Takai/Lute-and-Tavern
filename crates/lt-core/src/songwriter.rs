@@ -2,9 +2,9 @@
 //! writes songs from a request and rewrites them from feedback.
 
 use crate::library::{Draft, Message, Song};
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -67,7 +67,11 @@ fn system_prompt(cfg: &WriterConfig, tags: &[String]) -> String {
          Lyrics are singable, rhyme naturally, and scan evenly within each section. Never copy existing songs.\n\
          Genre tags already in the library: {}.\n\n{}",
         cfg.name,
-        if tags.is_empty() { "none yet".into() } else { tags.join(", ") },
+        if tags.is_empty() {
+            "none yet".into()
+        } else {
+            tags.join(", ")
+        },
         format_spec(cfg.exclude)
     )
 }
@@ -88,9 +92,13 @@ so it fits every Suno model. Describe the sound; do not write sentences or name 
 directions there. Short cues inside brackets are fine, e.g. [Instrumental Break] or [Fade Out].\n",
     );
     if exclude {
-        g.push_str(&format!("- **Exclude styles** (under More Options in Suno): {EXCLUDE_RULE}.\n"));
+        g.push_str(&format!(
+            "- **Exclude styles** (under More Options in Suno): {EXCLUDE_RULE}.\n"
+        ));
     } else {
-        g.push_str("- Leave **exclude** empty: this library does not use Suno's Exclude styles box.\n");
+        g.push_str(
+            "- Leave **exclude** empty: this library does not use Suno's Exclude styles box.\n",
+        );
     }
     g.push_str(
         "\n## Craft\n\
@@ -115,16 +123,33 @@ fn apply_exclude_setting(cfg: &WriterConfig, mut w: Written) -> Written {
     w
 }
 
-pub fn write_song(cfg: &WriterConfig, request: &str, genre_hint: Option<&str>, tags: &[String]) -> Result<Written> {
+pub fn write_song(
+    cfg: &WriterConfig,
+    request: &str,
+    genre_hint: Option<&str>,
+    tags: &[String],
+) -> Result<Written> {
     let mut user = format!("Write a song for this request:\n{request}");
     if let Some(g) = genre_hint.filter(|g| !g.trim().is_empty() && *g != crate::genre::UNSORTED) {
         user.push_str(&format!("\nUse the genre tag \"{g}\"."));
     }
-    let messages = vec![json!({"role": "system", "content": system_prompt(cfg, tags)}), json!({"role": "user", "content": user})];
-    Ok(apply_exclude_setting(cfg, parse_written(&chat(cfg, messages)?)?))
+    let messages = vec![
+        json!({"role": "system", "content": system_prompt(cfg, tags)}),
+        json!({"role": "user", "content": user}),
+    ];
+    Ok(apply_exclude_setting(
+        cfg,
+        parse_written(&chat(cfg, messages)?)?,
+    ))
 }
 
-pub fn rewrite(cfg: &WriterConfig, song: &Song, history: &[Message], instruction: &str, tags: &[String]) -> Result<Written> {
+pub fn rewrite(
+    cfg: &WriterConfig,
+    song: &Song,
+    history: &[Message],
+    instruction: &str,
+    tags: &[String],
+) -> Result<Written> {
     let current = json!({
         "title": song.title, "genre": song.genre, "sub_genre": song.sub_genre, "key": song.key, "bpm": song.bpm,
         "style": song.style, "exclude": if cfg.exclude { song.exclude.as_str() } else { "" }, "lyrics": song.lyrics, "chords": song.chords,
@@ -132,15 +157,29 @@ pub fn rewrite(cfg: &WriterConfig, song: &Song, history: &[Message], instruction
     let mut messages = vec![json!({"role": "system", "content": system_prompt(cfg, tags)})];
     messages.push(json!({"role": "user", "content": format!("The original request was:\n{}", song.request.clone().unwrap_or_default())}));
     // Earlier feedback gives the model the thread's direction without resending every past draft.
-    for m in history.iter().rev().take(12).collect::<Vec<_>>().into_iter().rev() {
-        let role = if m.role == "user" { "user" } else { "assistant" };
+    for m in history
+        .iter()
+        .rev()
+        .take(12)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+    {
+        let role = if m.role == "user" {
+            "user"
+        } else {
+            "assistant"
+        };
         messages.push(json!({"role": role, "content": m.text}));
     }
     messages.push(json!({
         "role": "user",
         "content": format!("Here is the current song:\n{}\n\nChange it like this: {instruction}\nReturn the whole updated song. Keep what the listener did not ask to change.", current)
     }));
-    Ok(apply_exclude_setting(cfg, parse_written(&chat(cfg, messages)?)?))
+    Ok(apply_exclude_setting(
+        cfg,
+        parse_written(&chat(cfg, messages)?)?,
+    ))
 }
 
 /// Lists the models the endpoint serves; used by Settings to check the connection.
@@ -150,12 +189,21 @@ pub fn list_models(cfg: &WriterConfig) -> Result<Vec<String>> {
     if let Some(k) = cfg.api_key.as_deref().filter(|k| !k.is_empty()) {
         req = req.bearer_auth(k);
     }
-    let res = req.send().with_context(|| format!("Could not reach {url}"))?;
+    let res = req
+        .send()
+        .with_context(|| format!("Could not reach {url}"))?;
     if !res.status().is_success() {
         bail!("{url} answered {}", res.status());
     }
     let v: Value = res.json()?;
-    Ok(v["data"].as_array().map(|a| a.iter().filter_map(|m| m["id"].as_str().map(String::from)).collect()).unwrap_or_default())
+    Ok(v["data"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|m| m["id"].as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default())
 }
 
 fn client() -> Result<reqwest::blocking::Client> {
@@ -168,30 +216,53 @@ fn chat(cfg: &WriterConfig, messages: Vec<Value>) -> Result<String> {
         bail!("Set up the songwriter in Settings first: an address and a model");
     }
     let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
-    let mut req = client()?.post(&url).json(&json!({"model": cfg.model, "messages": messages, "temperature": 0.8}));
+    let mut req = client()?
+        .post(&url)
+        .json(&json!({"model": cfg.model, "messages": messages, "temperature": 0.8}));
     if let Some(k) = cfg.api_key.as_deref().filter(|k| !k.is_empty()) {
         req = req.bearer_auth(k);
     }
-    let res = req.send().with_context(|| format!("Could not reach the songwriter at {url}"))?;
+    let res = req
+        .send()
+        .with_context(|| format!("Could not reach the songwriter at {url}"))?;
     let status = res.status();
-    let body: Value = res.json().context("The songwriter sent back something that is not JSON")?;
+    let body: Value = res
+        .json()
+        .context("The songwriter sent back something that is not JSON")?;
     if !status.is_success() {
-        let msg = body["error"]["message"].as_str().or(body["message"].as_str()).unwrap_or("no details");
+        let msg = body["error"]["message"]
+            .as_str()
+            .or(body["message"].as_str())
+            .unwrap_or("no details");
         bail!("The songwriter's server answered {status}: {msg}");
     }
-    body["choices"][0]["message"]["content"].as_str().map(String::from).ok_or_else(|| anyhow!("The songwriter's answer was empty"))
+    body["choices"][0]["message"]["content"]
+        .as_str()
+        .map(String::from)
+        .ok_or_else(|| anyhow!("The songwriter's answer was empty"))
 }
 
 fn parse_written(text: &str) -> Result<Written> {
     let v = extract_json(text).ok_or_else(|| anyhow!("The songwriter's answer was not in the expected format. Try again, or try another model."))?;
     let s = |k: &str| v[k].as_str().unwrap_or("").trim().to_string();
-    let chords: Vec<String> = v["chords"].as_array().map(|a| a.iter().filter_map(|c| c.as_str().map(|c| c.trim().to_string())).collect()).unwrap_or_default();
+    let chords: Vec<String> = v["chords"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|c| c.as_str().map(|c| c.trim().to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
     let draft = Draft {
         title: s("title"),
         genre: s("genre"),
         sub_genre: s("sub_genre"),
         key: s("key"),
-        bpm: v["bpm"].as_i64().or_else(|| v["bpm"].as_str().and_then(|b| b.parse().ok())).unwrap_or(0).clamp(0, 300),
+        bpm: v["bpm"]
+            .as_i64()
+            .or_else(|| v["bpm"].as_str().and_then(|b| b.parse().ok()))
+            .unwrap_or(0)
+            .clamp(0, 300),
         style: s("style"),
         exclude: s("exclude"),
         lyrics: s("lyrics"),
@@ -201,7 +272,10 @@ fn parse_written(text: &str) -> Result<Written> {
     if draft.lyrics.is_empty() {
         bail!("The songwriter did not send any lyrics. Try again, or try another model.");
     }
-    Ok(Written { reply: s("reply"), draft })
+    Ok(Written {
+        reply: s("reply"),
+        draft,
+    })
 }
 
 /// Finds the JSON object in a model's answer, skipping any thinking or code fences around it.
@@ -225,7 +299,12 @@ pub fn hook_to_notes(hook: &Value) -> Option<Value> {
             let mut chars = name.chars();
             let letter = chars.next()?.to_ascii_uppercase();
             let idx = "CDEFGAB".find(letter)? as i64;
-            let octave: i64 = name.chars().filter(|c| c.is_ascii_digit() || *c == '-').collect::<String>().parse().ok()?;
+            let octave: i64 = name
+                .chars()
+                .filter(|c| c.is_ascii_digit() || *c == '-')
+                .collect::<String>()
+                .parse()
+                .ok()?;
             let step = (octave * 7 + idx - 30).clamp(-8, 16);
             let len = match n["len"].as_str().unwrap_or("q") {
                 l @ ("w" | "h" | "q" | "e") => l,

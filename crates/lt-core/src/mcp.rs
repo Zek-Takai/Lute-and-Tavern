@@ -4,8 +4,8 @@
 
 use crate::library::{Draft, Library};
 use crate::songwriter::{hook_to_notes, suno_guide};
-use anyhow::{anyhow, bail, Result};
-use serde_json::{json, Value};
+use anyhow::{Result, anyhow, bail};
+use serde_json::{Value, json};
 
 pub const PROTOCOL_VERSIONS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
@@ -28,14 +28,21 @@ pub struct Handled {
 pub fn handle(cx: &Context, msg: &Value) -> Handled {
     let method = msg["method"].as_str().unwrap_or("");
     let Some(id) = msg.get("id").cloned() else {
-        return Handled { reply: None, changed: None }; // notification (e.g. notifications/initialized)
+        return Handled {
+            reply: None,
+            changed: None,
+        }; // notification (e.g. notifications/initialized)
     };
     let params = &msg["params"];
     let mut changed = None;
     let result: std::result::Result<Value, (i64, String)> = match method {
         "initialize" => {
             let asked = params["protocolVersion"].as_str().unwrap_or("");
-            let v = if PROTOCOL_VERSIONS.contains(&asked) { asked } else { PROTOCOL_VERSIONS[0] };
+            let v = if PROTOCOL_VERSIONS.contains(&asked) {
+                asked
+            } else {
+                PROTOCOL_VERSIONS[0]
+            };
             Ok(json!({
                 "protocolVersion": v,
                 "capabilities": {"tools": {}, "prompts": {}},
@@ -51,14 +58,21 @@ pub fn handle(cx: &Context, msg: &Value) -> Handled {
             Ok(match call(cx, name, &args) {
                 Ok((v, id)) => {
                     changed = id;
-                    let text = if let Value::String(s) = &v { s.clone() } else { serde_json::to_string_pretty(&v).unwrap_or_default() };
-                    let mut r = json!({"content": [{"type": "text", "text": text}], "isError": false});
+                    let text = if let Value::String(s) = &v {
+                        s.clone()
+                    } else {
+                        serde_json::to_string_pretty(&v).unwrap_or_default()
+                    };
+                    let mut r =
+                        json!({"content": [{"type": "text", "text": text}], "isError": false});
                     if v.is_object() {
                         r["structuredContent"] = v;
                     }
                     r
                 }
-                Err(e) => json!({"content": [{"type": "text", "text": format!("{e:#}")}], "isError": true}),
+                Err(e) => {
+                    json!({"content": [{"type": "text", "text": format!("{e:#}")}], "isError": true})
+                }
             })
         }
         "prompts/list" => Ok(json!({"prompts": [{
@@ -68,7 +82,11 @@ pub fn handle(cx: &Context, msg: &Value) -> Handled {
             "arguments": [{"name": "request", "description": "What the song should be about, its genre and mood", "required": true}],
         }]})),
         "prompts/get" if params["name"] == "write_suno_song" => {
-            let request = params["arguments"]["request"].as_str().unwrap_or("").trim().to_string();
+            let request = params["arguments"]["request"]
+                .as_str()
+                .unwrap_or("")
+                .trim()
+                .to_string();
             Ok(json!({
                 "description": "Write a song for Suno",
                 "messages": [{"role": "user", "content": {"type": "text", "text": format!(
@@ -80,13 +98,24 @@ pub fn handle(cx: &Context, msg: &Value) -> Handled {
     };
     let reply = match result {
         Ok(r) => json!({"jsonrpc": "2.0", "id": id, "result": r}),
-        Err((code, message)) => json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}}),
+        Err((code, message)) => {
+            json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
+        }
     };
-    Handled { reply: Some(reply), changed }
+    Handled {
+        reply: Some(reply),
+        changed,
+    }
 }
 
 fn song_fields(require: bool) -> Value {
-    let req = |d: &str| if require { format!("{d} (required)") } else { d.to_string() };
+    let req = |d: &str| {
+        if require {
+            format!("{d} (required)")
+        } else {
+            d.to_string()
+        }
+    };
     json!({
         "title": {"type": "string", "description": req("Song title")},
         "style": {"type": "string", "description": req("Suno 'Style of music': comma-separated tags, under 200 characters")},
@@ -105,7 +134,8 @@ fn song_fields(require: bool) -> Value {
 fn tools() -> Value {
     let read_only = json!({"readOnlyHint": true});
     let mut create = song_fields(true);
-    create["request"] = json!({"type": "string", "description": "What the person asked for, kept with the song"});
+    create["request"] =
+        json!({"type": "string", "description": "What the person asked for, kept with the song"});
     create["note"] = json!({"type": "string", "description": "One or two sentences to the person about the song"});
     create["songwriter"] = json!({"type": "string", "description": "Name to credit; defaults to the songwriter name set in the app"});
     let mut revise = song_fields(false);
@@ -141,13 +171,20 @@ fn text(a: &Value, k: &str) -> Option<String> {
 }
 
 fn draft_from(a: &Value, base: Draft) -> Draft {
-    let chords = a["chords"].as_array().map(|c| c.iter().filter_map(|x| x.as_str().map(|s| s.trim().to_string())).collect::<Vec<_>>());
+    let chords = a["chords"].as_array().map(|c| {
+        c.iter()
+            .filter_map(|x| x.as_str().map(|s| s.trim().to_string()))
+            .collect::<Vec<_>>()
+    });
     Draft {
         title: text(a, "title").unwrap_or(base.title),
         genre: text(a, "genre").unwrap_or(base.genre),
         sub_genre: text(a, "sub_genre").unwrap_or(base.sub_genre),
         key: text(a, "key").unwrap_or(base.key),
-        bpm: a["bpm"].as_i64().map(|b| b.clamp(0, 300)).unwrap_or(base.bpm),
+        bpm: a["bpm"]
+            .as_i64()
+            .map(|b| b.clamp(0, 300))
+            .unwrap_or(base.bpm),
         style: text(a, "style").unwrap_or(base.style),
         exclude: text(a, "exclude").unwrap_or(base.exclude),
         lyrics: text(a, "lyrics").unwrap_or(base.lyrics),
@@ -169,7 +206,11 @@ fn call(cx: &Context, name: &str, a: &Value) -> Result<(Value, Option<i64>)> {
     match name {
         "suno_songwriting_guide" => Ok((Value::String(suno_guide(cx.exclude)), None)),
         "list_genre_tags" => {
-            let tags: Vec<Value> = lib.genres()?.into_iter().map(|g| json!({"name": g.name, "songs": g.songs})).collect();
+            let tags: Vec<Value> = lib
+                .genres()?
+                .into_iter()
+                .map(|g| json!({"name": g.name, "songs": g.songs}))
+                .collect();
             Ok((json!({"tags": tags}), None))
         }
         "list_songs" => {
@@ -203,35 +244,65 @@ fn call(cx: &Context, name: &str, a: &Value) -> Result<(Value, Option<i64>)> {
         }
         "create_song" => {
             let d = draft_from(a, Draft::default());
-            for (k, v) in [("title", &d.title), ("style", &d.style), ("lyrics", &d.lyrics)] {
+            for (k, v) in [
+                ("title", &d.title),
+                ("style", &d.style),
+                ("lyrics", &d.lyrics),
+            ] {
                 if v.is_empty() {
                     bail!("{k} is required");
                 }
             }
-            let d = Draft { exclude: if cx.exclude { d.exclude } else { String::new() }, ..d };
-            let who = text(a, "songwriter").filter(|s| !s.is_empty()).unwrap_or_else(|| cx.writer_name.clone());
-            let request = text(a, "request").filter(|s| !s.is_empty()).unwrap_or_else(|| format!("\"{}\"", d.title));
+            let d = Draft {
+                exclude: if cx.exclude { d.exclude } else { String::new() },
+                ..d
+            };
+            let who = text(a, "songwriter")
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| cx.writer_name.clone());
+            let request = text(a, "request")
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| format!("\"{}\"", d.title));
             let song = lib.create_request(&request, None, &who)?;
             let song = lib.apply_draft(song.id, &d, "First draft", false)?;
             if let Some(note) = text(a, "note").filter(|s| !s.is_empty()) {
                 lib.add_message(song.id, "writer", &note)?;
             }
-            Ok((json!({"id": song.id, "title": song.title, "genre": song.genre, "songwriter": song.artist}), Some(song.id)))
+            Ok((
+                json!({"id": song.id, "title": song.title, "genre": song.genre, "songwriter": song.artist}),
+                Some(song.id),
+            ))
         }
         "revise_song" => {
             let id = a["id"].as_i64().ok_or_else(|| anyhow!("id is required"))?;
             let s = written(lib, id)?;
             let base = Draft {
-                title: s.title, genre: s.genre, sub_genre: s.sub_genre, key: s.key, bpm: s.bpm, style: s.style,
-                exclude: s.exclude, lyrics: s.lyrics, notes: None, chords: None,
+                title: s.title,
+                genre: s.genre,
+                sub_genre: s.sub_genre,
+                key: s.key,
+                bpm: s.bpm,
+                style: s.style,
+                exclude: s.exclude,
+                lyrics: s.lyrics,
+                notes: None,
+                chords: None,
             };
             let d = draft_from(a, base);
-            let d = Draft { exclude: if cx.exclude { d.exclude } else { String::new() }, ..d };
-            let note = text(a, "note").filter(|s| !s.is_empty()).unwrap_or_else(|| "Revised".into());
+            let d = Draft {
+                exclude: if cx.exclude { d.exclude } else { String::new() },
+                ..d
+            };
+            let note = text(a, "note")
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "Revised".into());
             let keep_genre = text(a, "genre").is_none_or(|g| g.is_empty());
             let song = lib.apply_draft(id, &d, &note, keep_genre)?;
             lib.add_message(id, "writer", &note)?;
-            Ok((json!({"id": song.id, "title": song.title, "genre": song.genre}), Some(id)))
+            Ok((
+                json!({"id": song.id, "title": song.title, "genre": song.genre}),
+                Some(id),
+            ))
         }
         _ => bail!("Unknown tool: {name}"),
     }
@@ -248,32 +319,74 @@ mod tests {
     }
 
     fn rpc(cx: &Context, method: &str, params: Value) -> Value {
-        handle(cx, &json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params})).reply.unwrap()
+        handle(
+            cx,
+            &json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}),
+        )
+        .reply
+        .unwrap()
     }
 
     #[test]
     fn tools_write_and_revise_songs() {
         let (_d, l) = lib();
-        let cx = Context { lib: &l, writer_name: "Ari".into(), exclude: false, version: "0" };
+        let cx = Context {
+            lib: &l,
+            writer_name: "Ari".into(),
+            exclude: false,
+            version: "0",
+        };
         let init = rpc(&cx, "initialize", json!({"protocolVersion": "2025-06-18"}));
         assert_eq!(init["result"]["protocolVersion"], "2025-06-18");
-        assert!(handle(&cx, &json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).reply.is_none());
-        assert_eq!(rpc(&cx, "tools/list", json!({}))["result"]["tools"].as_array().unwrap().len(), 6);
+        assert!(
+            handle(
+                &cx,
+                &json!({"jsonrpc": "2.0", "method": "notifications/initialized"})
+            )
+            .reply
+            .is_none()
+        );
+        assert_eq!(
+            rpc(&cx, "tools/list", json!({}))["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .len(),
+            6
+        );
 
         let args = json!({"title": "Lantern", "style": "folk, acoustic guitar", "lyrics": "[Verse 1]\nHi", "genre": "folk", "exclude": "drums"});
-        let r = rpc(&cx, "tools/call", json!({"name": "create_song", "arguments": args}));
+        let r = rpc(
+            &cx,
+            "tools/call",
+            json!({"name": "create_song", "arguments": args}),
+        );
         assert_eq!(r["result"]["isError"], false, "{r}");
         let id = r["result"]["structuredContent"]["id"].as_i64().unwrap();
         let s = l.song(id).unwrap();
-        assert_eq!((s.artist.as_str(), s.genre.as_str(), s.exclude.as_str()), ("Ari", "Folk", ""), "exclude stays off");
+        assert_eq!(
+            (s.artist.as_str(), s.genre.as_str(), s.exclude.as_str()),
+            ("Ari", "Folk", ""),
+            "exclude stays off"
+        );
 
-        let r = rpc(&cx, "tools/call", json!({"name": "revise_song", "arguments": {"id": id, "title": "Lanterns", "note": "Plural"}}));
+        let r = rpc(
+            &cx,
+            "tools/call",
+            json!({"name": "revise_song", "arguments": {"id": id, "title": "Lanterns", "note": "Plural"}}),
+        );
         assert_eq!(r["result"]["isError"], false, "{r}");
         let s = l.song(id).unwrap();
-        assert_eq!((s.title.as_str(), s.style.as_str(), s.genre.as_str()), ("Lanterns", "folk, acoustic guitar", "Folk"));
+        assert_eq!(
+            (s.title.as_str(), s.style.as_str(), s.genre.as_str()),
+            ("Lanterns", "folk, acoustic guitar", "Folk")
+        );
         assert_eq!(l.song_detail(id).unwrap().versions.len(), 2);
 
-        let r = rpc(&cx, "tools/call", json!({"name": "create_song", "arguments": {"title": "x"}}));
+        let r = rpc(
+            &cx,
+            "tools/call",
+            json!({"name": "create_song", "arguments": {"title": "x"}}),
+        );
         assert_eq!(r["result"]["isError"], true);
         assert_eq!(rpc(&cx, "nope", json!({}))["error"]["code"], -32601);
     }

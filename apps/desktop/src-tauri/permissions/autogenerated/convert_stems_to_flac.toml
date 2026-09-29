@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-convert-stems-to-flac"
+description = "Enables the convert_stems_to_flac command without any pre-configured scope."
+commands.allow = ["convert_stems_to_flac"]
+
+[[permission]]
+identifier = "deny-convert-stems-to-flac"
+description = "Denies the convert_stems_to_flac command without any pre-configured scope."
+commands.deny = ["convert_stems_to_flac"]
