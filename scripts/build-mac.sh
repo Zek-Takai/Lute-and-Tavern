@@ -4,6 +4,9 @@
 #
 #   scripts/build-mac.sh             Everyday build. Signed with your best certificate, not notarized.
 #                                    Opens on this Mac; takes about a minute.
+#
+# Both modes install the new build into /Applications (quitting a running copy first) and open it,
+# so the copy you launch is always the one you just built. LT_NO_INSTALL=1 skips that.
 #   scripts/build-mac.sh --release   Official release (version milestones such as 0.1.0 -> 1.0.0).
 #                                    Developer ID signature, Apple notarization, disk image, and the
 #                                    files the in-app updater downloads.
@@ -22,6 +25,23 @@ mode=${1:-local}
 [[ "$mode" == "--release" ]] && mode=release
 [[ "$mode" == "--local" ]] && mode=local
 bundle_dir=../../target/release/bundle
+
+# Replaces /Applications/Lute & Tavern.app with a fresh build and opens it.
+install_app() {
+  local src="$1" dst="/Applications/Lute & Tavern.app"
+  if [[ -n "${LT_NO_INSTALL:-}" ]]; then open -R "$src"; return; fi
+  if pgrep -f "Lute & Tavern.app/Contents/MacOS" >/dev/null; then
+    print "Quitting the running copy..."
+    osascript -e 'tell application "Lute & Tavern" to quit' >/dev/null 2>&1 || true
+    for _ in {1..20}; do pgrep -f "Lute & Tavern.app/Contents/MacOS" >/dev/null || break; sleep 0.5; done
+    pkill -f "Lute & Tavern.app/Contents/MacOS" 2>/dev/null || true
+  fi
+  rm -rf "$dst"
+  ditto "$src" "$dst"
+  codesign --verify --deep --strict "$dst"
+  print "Installed in /Applications and opening it."
+  open "$dst"
+}
 
 # Pick a certificate by its SHA-1 fingerprint: two certificates can share the same name,
 # and codesign refuses a name that matches more than one.
@@ -51,8 +71,7 @@ if [[ "$mode" == local ]]; then
   APPLE_SIGNING_IDENTITY="$hash" npm run tauri build -- --bundles app
   app="$bundle_dir/macos/Lute & Tavern.app"
   codesign --verify --deep --strict "$app"
-  print "\nDone. The app is in: $(cd "${app:h}" && pwd)"
-  open -R "$app"
+  install_app "$app"
   exit 0
 fi
 
@@ -108,4 +127,5 @@ else
   print "\nRelease ready in $(cd "$out" && pwd)."
   print "No LT_UPDATE_BASE_URL was set, so there is no latest.json and this build has no built-in update address."
 fi
+install_app "$app"
 open "$out"
