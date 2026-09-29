@@ -86,6 +86,7 @@ export const api = {
   readSheetText: (id: number) => invoke<string>('read_sheet_text', { id }),
   exportText: (path: string, contents: string) => invoke<void>('export_text', { path, contents }),
   addTake: (song: number, path: string, origin: string) => invoke<Take>('add_take', { song, path, origin }),
+  attachStems: (song: number, paths: string[]) => invoke<number>('attach_stems', { song, paths }),
   setMasterTake: (song: number, take: number) => invoke<void>('set_master_take', { song, take }),
   setStatus: (song: number, status: Status) => invoke<void>('set_status', { song, status }),
   writerConfig: () => invoke<WriterSettings>('writer_config'),

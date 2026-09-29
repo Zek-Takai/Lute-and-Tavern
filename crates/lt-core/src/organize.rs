@@ -319,7 +319,11 @@ impl Library {
     pub(crate) fn extras_dir(&self, id: i64, kind: &str) -> Result<PathBuf> {
         match self.ensure_song_dir(id)? {
             Some(d) => Ok(d.join(kind)),
-            None => Ok(if kind == "takes" { self.dirs.takes.join(id.to_string()) } else { self.dirs.sheets.join(id.to_string()) }),
+            None => Ok(match kind {
+                "takes" => self.dirs.takes.join(id.to_string()),
+                "stems" => self.dirs.takes.join(id.to_string()).join("stems"),
+                _ => self.dirs.sheets.join(id.to_string()),
+            }),
         }
     }
 

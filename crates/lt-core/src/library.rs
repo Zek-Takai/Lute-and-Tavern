@@ -934,6 +934,161 @@ impl Library {
         Ok(Take { id, name, origin: origin.into(), added_at: t })
     }
 
+    /// Attaches stem files to a song; a folder brings every audio file inside it. Files already in the
+    /// library folder move over, and any song they had become on their own is removed; others are copied.
+    pub fn attach_stems(&self, song: i64, paths: &[PathBuf]) -> Result<usize> {
+        let title = self.song(song)?.title;
+        let mut files = Vec::new();
+        for p in paths {
+            if p.is_dir() {
+                let mut stack = vec![p.clone()];
+                while let Some(d) = stack.pop() {
+                    for e in std::fs::read_dir(&d)?.flatten() {
+                        let path = e.path();
+                        let hidden = path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.'));
+                        if hidden {
+                            continue;
+                        }
+                        if path.is_dir() {
+                            stack.push(path);
+                        } else if tags::is_audio(&path) {
+                            files.push(path);
+                        }
+                    }
+                }
+            } else if tags::is_audio(p) {
+                files.push(p.clone());
+            }
+        }
+        files.sort();
+        if files.is_empty() {
+            bail!("No audio files there. Stems have to be audio files (WAV, MP3, FLAC, M4A or OGG).");
+        }
+        let dir = self.extras_dir(song, "stems")?;
+        std::fs::create_dir_all(&dir)?;
+        let lib_root = self.library_folder()?.map(|f| PathBuf::from(f.path));
+        let folder_id: Option<i64> = self.db().query_row("SELECT folder_id FROM songs WHERE id = ?1", [song], |r| r.get(0))?;
+        let mut emptied = Vec::new();
+        for src in &files {
+            let part = stem_part_name(src, &title);
+            let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("wav").to_ascii_lowercase();
+            let dest = unique_path(&dir, &format!("{}.{ext}", crate::organize::clean_name(&part)));
+            let sp = src.to_string_lossy().to_string();
+            let in_lib = lib_root.as_ref().is_some_and(|r| src.starts_with(r));
+            if in_lib {
+                if std::fs::rename(src, &dest).is_err() {
+                    std::fs::copy(src, &dest).with_context(|| format!("copying {}", src.display()))?;
+                    std::fs::remove_file(src)?;
+                }
+            } else {
+                std::fs::copy(src, &dest).with_context(|| format!("copying {}", src.display()))?;
+                // Dropped into the app earlier, the same file was copied into the library as its own song or stem.
+                if let Some(root) = &lib_root {
+                    for (kind, id, path) in self.library_copies_of(src, root, song)? {
+                        std::fs::remove_file(&path)?;
+                        let db = self.db();
+                        if kind == "song" {
+                            db.execute("UPDATE songs SET path = NULL WHERE id = ?1", [id])?;
+                            emptied.push(id);
+                        } else {
+                            let owner: i64 = db.query_row("SELECT song_id FROM stems WHERE id = ?1", [id], |r| r.get(0))?;
+                            db.execute("DELETE FROM stems WHERE id = ?1", [id])?;
+                            emptied.push(owner);
+                        }
+                    }
+                }
+            }
+            let mtime = std::fs::metadata(&dest)?.modified().ok().and_then(|m| m.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64);
+            let dp = dest.to_string_lossy().to_string();
+            let db = self.db();
+            // A file that already was a stem of another song moves its row here.
+            let was_stem: Option<(i64, i64)> =
+                db.query_row("SELECT id, song_id FROM stems WHERE path = ?1", [&sp], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+            match (was_stem, in_lib) {
+                (Some((sid, owner)), true) => {
+                    db.execute("UPDATE stems SET song_id = ?2, name = ?3, path = ?4, file_mtime = ?5, folder_id = ?6 WHERE id = ?1", params![sid, song, part, dp, mtime, folder_id])?;
+                    if owner != song {
+                        emptied.push(owner);
+                    }
+                }
+                _ => {
+                    db.execute("INSERT INTO stems(song_id, name, path, file_mtime, folder_id) VALUES (?1, ?2, ?3, ?4, ?5)", params![song, part, dp, mtime, folder_id])?;
+                }
+            }
+            // A file that had been imported as its own song stops being one.
+            if in_lib {
+                let was_song: Option<i64> = db.query_row("SELECT id FROM songs WHERE path = ?1 AND id != ?2", params![sp, song], |r| r.get(0)).optional()?;
+                if let Some(other) = was_song {
+                    db.execute("UPDATE songs SET path = NULL WHERE id = ?1", [other])?;
+                    emptied.push(other);
+                }
+            }
+        }
+        for other in emptied {
+            self.drop_if_empty(other)?;
+        }
+        self.db().execute("UPDATE songs SET updated_at = ?2 WHERE id = ?1", params![song, now()])?;
+        self.write_sidecar(song)?;
+        Ok(files.len())
+    }
+
+    /// Songs and stems inside the library folder whose file is a byte-for-byte copy of `src`.
+    fn library_copies_of(&self, src: &Path, root: &Path, except_song: i64) -> Result<Vec<(&'static str, i64, PathBuf)>> {
+        let len = std::fs::metadata(src)?.len();
+        let candidates: Vec<(&'static str, i64, String)> = {
+            let db = self.db();
+            let mut out = Vec::new();
+            let mut st = db.prepare("SELECT id, path FROM songs WHERE path IS NOT NULL AND id != ?1 AND source = 'library'")?;
+            out.extend(st.query_map([except_song], |r| Ok(("song", r.get(0)?, r.get(1)?)))?.flatten());
+            let mut st = db.prepare("SELECT id, path FROM stems WHERE song_id != ?1")?;
+            out.extend(st.query_map([except_song], |r| Ok(("stem", r.get(0)?, r.get(1)?)))?.flatten());
+            out
+        };
+        let mut found = Vec::new();
+        let mut want: Option<Vec<u8>> = None;
+        for (kind, id, p) in candidates {
+            let p = PathBuf::from(p);
+            if !p.starts_with(root) || std::fs::metadata(&p).map(|m| m.len()).ok() != Some(len) {
+                continue;
+            }
+            let a = match &want {
+                Some(a) => a,
+                None => want.insert(std::fs::read(src)?),
+            };
+            if std::fs::read(&p).is_ok_and(|b| &b == a) {
+                found.push((kind, id, p));
+            }
+        }
+        Ok(found)
+    }
+
+    /// Removes a library song left with no audio at all (its file and stems moved elsewhere), and its empty folder.
+    fn drop_if_empty(&self, id: i64) -> Result<()> {
+        let (dir, empty): (Option<String>, bool) = self.db().query_row(
+            "SELECT song_dir, path IS NULL AND provider = 'local' AND source = 'library' \
+             AND NOT EXISTS (SELECT 1 FROM stems WHERE song_id = ?1) AND NOT EXISTS (SELECT 1 FROM takes WHERE song_id = ?1) \
+             FROM songs WHERE id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        if !empty {
+            return Ok(());
+        }
+        self.db().execute("DELETE FROM songs WHERE id = ?1", [id])?;
+        if let Some(dir) = dir.map(PathBuf::from) {
+            for d in [dir.join("stems"), dir.clone()] {
+                let junk_only = std::fs::read_dir(&d).map(|r| r.flatten().all(|e| {
+                    let n = e.file_name().to_string_lossy().to_lowercase();
+                    n == "song.json" || n == ".ds_store" || n == "desktop.ini" || n == "thumbs.db" || n.starts_with("cover.")
+                })).unwrap_or(false);
+                if junk_only {
+                    let _ = std::fs::remove_dir_all(&d);
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn set_master_take(&self, song: i64, take: i64) -> Result<()> {
         self.db().execute("UPDATE songs SET master_take = ?2, updated_at = ?3 WHERE id = ?1", params![song, take, now()])?;
         Ok(())
@@ -1083,6 +1238,17 @@ fn is_hidden(path: &Path) -> bool {
     path.components().any(|c| c.as_os_str().to_str().is_some_and(|s| s.starts_with('.') && s.len() > 1 && s != ".."))
 }
 
+/// A stem's part name: "Song (Vocals).wav" gives "Vocals"; "Song - Drums.wav" or "Drums.wav" gives "Drums".
+fn stem_part_name(path: &Path, title: &str) -> String {
+    if let Some((_, name)) = tags::stem_of(path) {
+        return name;
+    }
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Stem").trim();
+    let rest = if !title.is_empty() && stem.len() > title.len() && stem[..title.len()].eq_ignore_ascii_case(title) { &stem[title.len()..] } else { stem };
+    let rest = rest.trim_matches(|c: char| c.is_whitespace() || "-_()[].".contains(c));
+    if rest.is_empty() { stem.to_string() } else { rest.to_string() }
+}
+
 fn unique_path(dir: &Path, name: &str) -> PathBuf {
     let candidate = dir.join(name);
     if !candidate.exists() {
@@ -1204,6 +1370,65 @@ mod tests {
         assert_eq!(l.rename_writer("Bard", "Ari").unwrap(), 1);
         assert_eq!(l.song(a.id).unwrap().artist, "Ari");
         assert_eq!(l.song(b.id).unwrap().artist, "Me", "a hand-set artist stays");
+    }
+
+    #[test]
+    fn stems_attach_to_a_song_from_a_folder() {
+        let (d, l) = lib();
+        let s = l.create_request("a song", None, "Bard").unwrap();
+        l.apply_draft(s.id, &Draft { title: "Porch Light".into(), lyrics: "x".into(), ..Default::default() }, "v", false).unwrap();
+        let src = d.path().join("Porch Light Stems");
+        std::fs::create_dir_all(&src).unwrap();
+        for f in ["Porch Light (Vocals).wav", "Porch Light - Drums.mp3", "Bass.flac", "notes.txt"] {
+            std::fs::write(src.join(f), b"x").unwrap();
+        }
+        assert_eq!(l.attach_stems(s.id, &[src.clone()]).unwrap(), 3);
+        let mut names: Vec<String> = l.song_detail(s.id).unwrap().stem_files.into_iter().map(|f| f.name).collect();
+        names.sort();
+        assert_eq!(names, ["Bass", "Drums", "Vocals"]);
+        assert!(src.join("Bass.flac").exists(), "files outside the library are copied, not moved");
+        assert!(l.attach_stems(s.id, &[d.path().join("nothing-here")]).is_err());
+    }
+
+    #[test]
+    fn attaching_stems_that_became_songs_removes_those_songs() {
+        let (d, l) = lib();
+        let root = d.path().join("Library");
+        let f = l.set_library_folder(&root).unwrap();
+        let stray = root.join("Songs/Guitar/Guitar.mp3");
+        std::fs::create_dir_all(stray.parent().unwrap()).unwrap();
+        std::fs::write(&stray, b"x").unwrap();
+        l.scan_folder(&f).unwrap();
+        assert_eq!(l.songs().unwrap().len(), 1);
+        let s = l.create_request("a song", None, "Bard").unwrap();
+        l.apply_draft(s.id, &Draft { title: "Porch Light".into(), lyrics: "x".into(), ..Default::default() }, "v", false).unwrap();
+        assert_eq!(l.attach_stems(s.id, &[stray.clone()]).unwrap(), 1);
+        let songs = l.songs().unwrap();
+        assert_eq!(songs.len(), 1, "the stray song is gone");
+        assert_eq!(songs[0].stems, 1);
+        assert!(!stray.exists() && !root.join("Songs/Guitar").exists(), "moved, and its emptied folder removed");
+        l.scan_folder(&f).unwrap();
+        assert_eq!(l.songs().unwrap().len(), 1, "a rescan does not bring it back");
+        assert_eq!(l.song(s.id).unwrap().stems, 1);
+    }
+
+    #[test]
+    fn attaching_the_original_folder_folds_in_library_copies() {
+        let (d, l) = lib();
+        let root = d.path().join("Library");
+        let f = l.set_library_folder(&root).unwrap();
+        let outside = d.path().join("Downloads/Porch Light Stems");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("Porch Light (Bass).mp3"), b"bass bytes").unwrap();
+        let copy = root.join("Songs/Bass/Bass.mp3");
+        std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
+        std::fs::write(&copy, b"bass bytes").unwrap();
+        l.scan_folder(&f).unwrap();
+        let s = l.create_request("a song", None, "Bard").unwrap();
+        l.apply_draft(s.id, &Draft { title: "Porch Light".into(), lyrics: "x".into(), ..Default::default() }, "v", false).unwrap();
+        l.attach_stems(s.id, &[outside.clone()]).unwrap();
+        assert_eq!(l.songs().unwrap().len(), 1, "the library copy's song is gone");
+        assert!(!copy.exists() && outside.join("Porch Light (Bass).mp3").exists());
     }
 
     #[test]

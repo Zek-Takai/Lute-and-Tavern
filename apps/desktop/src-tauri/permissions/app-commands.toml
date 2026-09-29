@@ -30,6 +30,7 @@ commands.allow = [
   "read_sheet_text",
   "export_text",
   "add_take",
+  "attach_stems",
   "set_master_take",
   "set_status",
   "writer_config",

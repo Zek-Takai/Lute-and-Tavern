@@ -8,6 +8,25 @@ import { $, copyText, date, esc, PLAY, toast } from '../util';
 import { sourceBadge, STATUS } from './library';
 import { renderSheet, resetSheet } from './sheet';
 
+const STEM_BUTTONS = `<button class="btn" data-attach="folder">Attach a stems folder…</button><button class="btn" data-attach="files">Attach stem files…</button>`;
+
+/** Wires the attach-stems buttons: every audio file picked (or inside the folder picked) becomes a part of this song. */
+function wireAttachStems(b: HTMLElement, s: SongDetail, afterChange: () => Promise<void>) {
+  b.querySelectorAll<HTMLElement>('[data-attach]').forEach((btn) => (btn.onclick = async () => {
+    const folder = btn.dataset.attach === 'folder';
+    const picked = await pickFile(folder ? { directory: true, multiple: false } : { multiple: true, filters: [{ name: 'Audio', extensions: ['mp3', 'wav', 'flac', 'm4a', 'ogg', 'aac', 'opus', 'aiff'] }] });
+    const paths = picked == null ? [] : Array.isArray(picked) ? picked : [picked];
+    if (!paths.length) return;
+    try {
+      const n = await api.attachStems(s.id, paths);
+      await afterChange();
+      toast(`${n} stem${n === 1 ? '' : 's'} attached to "${s.title}"`);
+    } catch (e) {
+      toast(errText(e));
+    }
+  }));
+}
+
 export let cur: SongDetail | null = null;
 let tab = 'song';
 
@@ -115,7 +134,7 @@ export function renderTab() {
             })
             .join('')
         : `<p class="muted" style="margin-top:0">No takes yet. Generate the song in Suno with the fields on the Song tab, then add the audio file here.</p>`) +
-      `<div class="row"><button class="btn" id="addTake">Add a take</button>${s.status !== 'done' && s.takes.length ? '<button class="btn" id="markDone">Mark song finished</button>' : ''}</div>
+      `<div class="row"><button class="btn" id="addTake">Add a take</button>${STEM_BUTTONS}${s.status !== 'done' && s.takes.length ? '<button class="btn" id="markDone">Mark song finished</button>' : ''}</div>
       <p class="small muted">The master take is what plays in your library. Turning a take into sheet music automatically is planned for a later version.</p>`;
     b.querySelectorAll<HTMLElement>('[data-take]').forEach((x) => (x.onclick = () => {
       const t = s.takes.find((t) => t.id === Number(x.dataset.take))!;
@@ -126,6 +145,7 @@ export function renderTab() {
       await afterChange();
       toast('Master take set');
     }));
+    wireAttachStems(b, s, afterChange);
     $('#addTake').onclick = async () => {
       const path = await pickFile({ multiple: false, filters: [{ name: 'Audio', extensions: ['mp3', 'wav', 'flac', 'm4a', 'ogg', 'aac', 'opus', 'aiff'] }] });
       if (typeof path !== 'string') return;
@@ -160,6 +180,7 @@ export function renderTab() {
       <dt>Added</dt><dd>${date(s.addedAt)}</dd>
       ${s.songDir ? `<dt>Folder</dt><dd class="path-text">${esc(s.songDir)}</dd>` : ''}
     </dl>
+    ${s.source !== 'ai' && !s.provider?.startsWith('apple') ? `<div class="row">${STEM_BUTTONS}</div>` : ''}
     ${s.songDir
       ? '<p class="small muted">This song lives in your library folder. To remove it, move its folder out of the library or to the Trash.</p>'
       : '<div class="row danger-zone"><button class="btn small" id="delSong">Remove from library</button><span class="muted small" id="delNote"></span></div>'}`;
@@ -183,6 +204,7 @@ export function renderTab() {
       await api.toggleInPlaylist(Number(cb.dataset.pl), s.id, cb.checked).catch((e) => toast(errText(e)));
       await afterChange();
     }));
+    wireAttachStems(b, s, afterChange);
     $('#plAddNew').onclick = async () => {
       const p = await api.createPlaylist(`Playlist ${state.playlists.length + 1}`, [s.id]);
       await afterChange();
@@ -210,6 +232,7 @@ export function renderTab() {
     const live = playing?.kind === 'stems' && playing.id === String(s.id);
     b.innerHTML = `<div class="row" style="margin-bottom:12px"><button class="btn primary" id="stemPlay">${live ? 'Stop' : 'Play the stems together'}</button>
         <span class="muted small">${parts.length} parts. Mute, solo or turn down any part while it plays.${s.hasFile ? ' The play button at the top plays the full song file.' : ''}</span></div>
+      <div class="row" style="margin-bottom:12px">${STEM_BUTTONS}</div>
       <ul class="stem-list">${parts
         .map((f) => {
           const m = stemMix(s.id, f.name);
@@ -222,6 +245,7 @@ export function renderTab() {
         })
         .join('')}</ul>
       <p class="small muted">Stems are the separate parts of a song (vocals, drums, bass...). When a folder has only stems, Lute &amp; Tavern plays them together as the song.</p>`;
+    wireAttachStems(b, s, afterChange);
     $('#stemPlay').onclick = () => {
       if (playing?.kind === 'stems' && playing.id === String(s.id)) stop();
       else void playStems(byId(s.id) ?? s);
