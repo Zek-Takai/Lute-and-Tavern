@@ -102,3 +102,4 @@ nav.rail { position: sticky; top: 16px; display: flex; flex-direction: column; a
 .album-row > span:first-child { display: flex; flex-direction: column; min-width: 0; text-align: left; }
 .album-row .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .album-row small { color: var(--ink-2); font-size: 12px; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.player[data-skin="minimal"] .tog[aria-pressed="true"], .player[data-skin="minimal"] .tog[aria-expanded="true"] { color: var(--accent); background: var(--accent-soft); }
