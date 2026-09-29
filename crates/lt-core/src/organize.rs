@@ -7,7 +7,7 @@
 //! <library>/Songs/<Title>/takes/  sheets/      takes and sheet music added in the app
 //! <library>/Songs/<Title>/cover.<ext>          artwork
 //! <library>/Songs/<Title>/song.json            everything the app knows: tags, lyrics, Suno fields, versions
-//! <library>/Albums/<Artist>/<Album>/NN - <Title>.<ext>   other artists' albums, kept together
+//! <library>/Albums/<Album artist>/<Album>/NN - <Title>.<ext>   albums, kept together (compilations under their album artist)
 //! ```
 //!
 //! Only the library folder is organized; other music folders are watched and never changed.
@@ -200,7 +200,8 @@ impl Library {
                 let album = info.album.trim();
                 if !album.is_empty() && !album.to_lowercase().ends_with(" stems") {
                     let n = info.track.map(|t| format!("{t:02} - ")).unwrap_or_default();
-                    let f = root.join(ALBUMS).join(clean_name(&info.artist)).join(clean_name(album)).join(format!("{n}{}.{ext}", clean_name(&info.title)));
+                    let album_artist = if info.album_artist.is_empty() { &info.artist } else { &info.album_artist };
+                    let f = root.join(ALBUMS).join(clean_name(album_artist)).join(clean_name(album)).join(format!("{n}{}.{ext}", clean_name(&info.title)));
                     (f, None)
                 } else {
                     let dir = self.song_dir_for(&root, &info.title, &info.artist, None)?;

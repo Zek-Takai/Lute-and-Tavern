@@ -35,6 +35,8 @@ pub struct TrackInfo {
     pub title: String,
     pub artist: String,
     pub album: String,
+    /// The album's artist ("Various Artists" on compilations); empty when the file does not say.
+    pub album_artist: String,
     pub year: String,
     pub genre: String,
     pub track: Option<u32>,
@@ -61,6 +63,9 @@ pub fn read_track(path: &Path, root: Option<&Path>) -> TrackInfo {
             set(&mut info.title, tag.title());
             set(&mut info.artist, tag.artist());
             set(&mut info.album, tag.album());
+            if let Some(a) = tag.get_string(ItemKey::AlbumArtist).map(str::trim).filter(|a| !a.is_empty()) {
+                info.album_artist = a.to_string();
+            }
             if let Some(g) = tag.genre() {
                 info.genre = genre::normalize(&g);
             }
