@@ -138,8 +138,8 @@ function render() {
         : '<p class="small">Add a MusicKit key below to turn Apple Music on.</p>'}
       <label class="row small"><input type="checkbox" id="amShow" ${state.settings.showAppleInLibrary === false ? '' : 'checked'}> Show saved Apple Music songs in my library (they always show in playlists and the Apple Music tab)</label>
       ${apple.builtIn ? '' : `<details ${apple.ready ? '' : 'open'}><summary class="small">MusicKit key (for people building the app themselves)</summary>
-        <p class="muted small">From developer.apple.com: a Media ID with MusicKit, then a key with Media Services. The .p8 file is read once into the Keychain.</p>
-        <div class="form"><label for="amKeyId">Key ID</label><input id="amKeyId" value="${esc(apple.keyId)}" placeholder="10 characters">
+        <p class="muted small">Type your Team ID (10 characters, shown under Membership on developer.apple.com), then choose the AuthKey_….p8 file you downloaded. The Key ID comes from the file name. The key is read once into your Keychain.</p>
+        <div class="form"><label for="amKeyId">Key ID</label><input id="amKeyId" value="${esc(apple.keyId)}" placeholder="Filled in from the file name if empty">
           <label for="amTeam">Team ID</label><input id="amTeam" value="${esc(apple.teamId)}" placeholder="10 characters"></div>
         <div class="row"><button class="btn small" id="amKey">Choose the .p8 key file…</button>${apple.ready ? '<button class="btn small" id="amForget">Remove key</button>' : ''}<span class="muted small" id="amStatus"></span></div>
       </details>`}
@@ -276,7 +276,11 @@ function render() {
       toast('MusicKit key saved in your Keychain');
       render();
       rerender();
-    } catch (e) { amStatus(errText(e)); }
+    } catch (e) {
+      amStatus(errText(e));
+      toast(`MusicKit key not saved: ${errText(e)}`);
+      void api.logEvent('error', `musickit key: ${errText(e)}`);
+    }
   });
   document.getElementById('amForget')?.addEventListener('click', async () => { await forgetAppleKey(); apple = await appleStatus(); render(); });
   $('#uAuto').onchange = (e) => void saveSetting('autoUpdate', (e.target as HTMLInputElement).checked);

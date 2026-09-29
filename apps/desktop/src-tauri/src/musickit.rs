@@ -49,11 +49,28 @@ pub fn musickit_status(state: State<'_, AppState>) -> Status {
 /// Saves a MusicKit key (the .p8 file from the Apple Developer site) in the keychain.
 #[tauri::command]
 pub async fn musickit_set_key(state: State<'_, AppState>, cache: State<'_, TokenCache>, path: String, key_id: String, team_id: String) -> Result<(), String> {
-    let pem = std::fs::read_to_string(&path).map_err(|e| format!("Could not read {path}: {e}"))?;
+    let result = save_key(&state, &cache, &path, &key_id, &team_id);
+    match &result {
+        Ok(()) => crate::log::write("info", "MusicKit key saved in the keychain"),
+        Err(e) => crate::log::write("error", &format!("MusicKit key not saved: {e}")),
+    }
+    result
+}
+
+fn save_key(state: &AppState, cache: &TokenCache, path: &str, key_id: &str, team_id: &str) -> Result<(), String> {
+    let pem = std::fs::read_to_string(path).map_err(|e| format!("Could not read {path}: {e}"))?;
     if !pem.contains("PRIVATE KEY") {
         return Err("That file is not a MusicKit key. It should be the AuthKey_….p8 file from the Apple Developer site.".into());
     }
-    let (key_id, team_id) = (key_id.trim().to_string(), team_id.trim().to_string());
+    // Apple names the file AuthKey_<KeyID>.p8, so an empty Key ID box is filled from the file name.
+    let from_name = std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .and_then(|s| s.strip_prefix("AuthKey_"))
+        .unwrap_or("")
+        .to_string();
+    let key_id = if key_id.trim().is_empty() { from_name } else { key_id.trim().trim_start_matches("AuthKey_").to_string() };
+    let team_id = team_id.trim().to_string();
     if key_id.len() != 10 || team_id.len() != 10 {
         return Err("The Key ID and Team ID are both 10 characters, like ABC123DEFG.".into());
     }
