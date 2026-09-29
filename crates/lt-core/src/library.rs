@@ -432,14 +432,18 @@ impl Library {
     }
 
     /// Copies an image into the art folder and attaches it to the song.
+    /// Sets artwork from an image, or from the cover embedded in an audio file (e.g. Suno's MP3 download).
     pub fn set_art_from_file(&self, id: i64, src: &Path) -> Result<Song> {
-        let bytes = std::fs::read(src).with_context(|| format!("reading {}", src.display()))?;
-        let ext = src
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("jpg")
-            .to_ascii_lowercase();
-        let name = self.store_art(&bytes, &ext)?;
+        let name = if tags::is_audio(src) {
+            let (bytes, ext) = tags::read_track(src, None)
+                .picture
+                .ok_or_else(|| anyhow!("{} has no cover art inside it. Suno puts covers in its MP3 downloads.", src.display()))?;
+            self.store_art(&bytes, ext)?
+        } else {
+            let bytes = std::fs::read(src).with_context(|| format!("reading {}", src.display()))?;
+            let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("jpg").to_ascii_lowercase();
+            self.store_art(&bytes, &ext)?
+        };
         self.db().execute(
             "UPDATE songs SET art = ?2, updated_at = ?3 WHERE id = ?1",
             params![id, name, now()],

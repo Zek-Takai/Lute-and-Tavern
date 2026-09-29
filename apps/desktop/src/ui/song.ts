@@ -238,7 +238,7 @@ export function renderTab() {
       }
     }));
     $('#artSet').onclick = async () => {
-      const path = await pickFile({ multiple: false, filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp'] }] });
+      const path = await pickFile({ multiple: false, filters: [{ name: 'Images, or a song file with a cover inside', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp3', 'm4a', 'flac', 'ogg', 'opus'] }] });
       if (typeof path !== 'string') return;
       await api.setArt(s.id, path).catch((e) => toast(errText(e)));
       await afterChange();
