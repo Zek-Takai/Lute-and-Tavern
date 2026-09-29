@@ -133,16 +133,16 @@ function render() {
     <section class="set-sec">
       <h3>Apple Music</h3>
       <p class="muted small">Play Apple Music inside Lute &amp; Tavern with your Apple Music subscription. Your Apple ID sign-in and every key stay in your Mac's Keychain, never in the app's files.</p>
-      ${apple.ready
-        ? `<div class="row">${isConnected() ? '<span class="src src-apple">Connected</span><button class="btn small" id="amOff">Disconnect</button>' : '<button class="btn primary small" id="amOn">Connect Apple Music</button>'}</div>`
-        : '<p class="small">Add a MusicKit key below to turn Apple Music on.</p>'}
+      <ol class="steps small">
+        ${apple.builtIn ? '' : `<li><b>MusicKit key.</b> ${apple.ready ? `Saved in your Keychain (Key ID ${esc(apple.keyId)}). <button class="btn small" id="amForget">Remove key</button>` : `Choose the AuthKey_….p8 file from developer.apple.com, check the Team ID, then save.
+          <div class="row" style="margin-top:6px"><button class="btn small" id="amKey">Choose the .p8 file…</button><span class="muted" id="amFile">No file chosen</span></div>
+          <div class="form" style="margin-top:6px"><label for="amKeyId">Key ID</label><input id="amKeyId" value="${esc(apple.keyId)}" placeholder="Filled in from the file name">
+            <label for="amTeam">Team ID</label><input id="amTeam" value="${esc(apple.teamId)}" placeholder="10 characters, under Membership"></div>
+          <div class="row" style="margin-top:6px"><button class="btn primary small" id="amSave" disabled>Save key</button><span class="muted" id="amStatus"></span></div>`}</li>`}
+        <li><b>Sign in.</b> <button class="btn ${isConnected() ? '' : 'primary'} small" id="amOn" ${apple.ready && !isConnected() ? '' : 'disabled'}>${isConnected() ? 'Connected' : 'Connect Apple Music'}</button>
+          ${isConnected() ? '<button class="btn small" id="amOff">Disconnect</button>' : apple.ready ? '' : '<span class="muted">Available once the key is saved.</span>'}</li>
+      </ol>
       <label class="row small"><input type="checkbox" id="amShow" ${state.settings.showAppleInLibrary === false ? '' : 'checked'}> Show saved Apple Music songs in my library (they always show in playlists and the Apple Music tab)</label>
-      ${apple.builtIn ? '' : `<details ${apple.ready ? '' : 'open'}><summary class="small">MusicKit key (for people building the app themselves)</summary>
-        <p class="muted small">Type your Team ID (10 characters, shown under Membership on developer.apple.com), then choose the AuthKey_….p8 file you downloaded. The Key ID comes from the file name. The key is read once into your Keychain.</p>
-        <div class="form"><label for="amKeyId">Key ID</label><input id="amKeyId" value="${esc(apple.keyId)}" placeholder="Filled in from the file name if empty">
-          <label for="amTeam">Team ID</label><input id="amTeam" value="${esc(apple.teamId)}" placeholder="10 characters"></div>
-        <div class="row"><button class="btn small" id="amKey">Choose the .p8 key file…</button>${apple.ready ? '<button class="btn small" id="amForget">Remove key</button>' : ''}<span class="muted small" id="amStatus"></span></div>
-      </details>`}
     </section>
 
     <section class="set-sec">
@@ -267,13 +267,32 @@ function render() {
   });
   document.getElementById('amOff')?.addEventListener('click', async () => { await disconnectApple().catch(() => {}); render(); rerender(); });
   $('#amShow').onchange = async (e) => { await saveSetting('showAppleInLibrary', (e.target as HTMLInputElement).checked); rerender(); };
+  let keyPath = '';
+  const validId = (v: string) => /^[A-Z0-9]{10}$/i.test(v.trim());
+  const checkSave = () => {
+    const btn = document.getElementById('amSave') as HTMLButtonElement | null;
+    if (!btn) return;
+    const kid = ($('#amKeyId') as HTMLInputElement).value, team = ($('#amTeam') as HTMLInputElement).value;
+    btn.disabled = !(keyPath && validId(kid) && validId(team));
+    amStatus(!keyPath ? '' : !validId(kid) ? 'The Key ID should be 10 letters and numbers.' : !validId(team) ? 'The Team ID should be 10 letters and numbers.' : 'Ready to save.');
+  };
+  document.getElementById('amKeyId')?.addEventListener('input', checkSave);
+  document.getElementById('amTeam')?.addEventListener('input', checkSave);
   document.getElementById('amKey')?.addEventListener('click', async () => {
     const path = await pickFolder({ multiple: false, directory: false, filters: [{ name: 'MusicKit key', extensions: ['p8'] }] });
     if (typeof path !== 'string') return;
+    keyPath = path;
+    const name = path.split(/[\\/]/).pop() ?? path;
+    $('#amFile').textContent = name;
+    const m = name.match(/^AuthKey_([A-Z0-9]{10})\.p8$/i);
+    if (m && !($('#amKeyId') as HTMLInputElement).value.trim()) ($('#amKeyId') as HTMLInputElement).value = m[1];
+    checkSave();
+  });
+  document.getElementById('amSave')?.addEventListener('click', async () => {
     try {
-      await setAppleKey(path, $<HTMLInputElement>('#amKeyId').value, $<HTMLInputElement>('#amTeam').value);
+      await setAppleKey(keyPath, ($('#amKeyId') as HTMLInputElement).value, ($('#amTeam') as HTMLInputElement).value);
       apple = await appleStatus();
-      toast('MusicKit key saved in your Keychain');
+      toast('MusicKit key saved in your Keychain. Now connect Apple Music.');
       render();
       rerender();
     } catch (e) {

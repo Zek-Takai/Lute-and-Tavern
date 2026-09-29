@@ -111,3 +111,5 @@ nav.rail { position: sticky; top: 16px; display: flex; flex-direction: column; a
 .src-mine { color: #7fd8b0; border-color: rgba(127,216,176,.35); background: rgba(127,216,176,.1); }
 .side-sub { font: 600 12px/1 var(--body); color: var(--ink-2); margin: 12px 10px 4px; }
 .grid-sub { grid-column: 1 / -1; font: 700 18px/1.2 var(--display); margin: 12px 0 0; }
+.steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; }
+.steps li::marker { color: var(--accent); font-weight: 700; }
