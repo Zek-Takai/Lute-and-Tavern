@@ -101,3 +101,6 @@ nav.rail { position: sticky; top: 16px; display: flex; flex-direction: column; a
 .player[data-line="rainbow"] .scrub .track i { background: linear-gradient(90deg, #ff5e7e, #ffb347, #ffe66d, #5ee7a0, #5ec8ff, #9a7bff); }
 .player[data-line="white"] .scrub .track i { background: #fff; box-shadow: none; }
 .player[data-line="gold"] .scrub .track i { background: linear-gradient(90deg, #E9A93A, #FFE08A); box-shadow: none; }
+.album-row > span:first-child { display: flex; flex-direction: column; min-width: 0; text-align: left; }
+.album-row .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.album-row small { color: var(--ink-2); font-size: 12px; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

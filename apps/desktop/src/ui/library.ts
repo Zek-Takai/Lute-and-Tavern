@@ -2,7 +2,7 @@
 import { api, errText, lt, type Song } from '../api';
 import { playSong, syncIcons } from '../player';
 import { keyName, staffSVG, toMeasures } from '../music/notation';
-import { genresInUse, playable, rerender, reload, saveSetting, state, viewName, visible, writerName, type SideTab } from '../state';
+import { albums, genresInUse, playable, rerender, reload, saveSetting, state, viewName, visible, writerName, type SideTab } from '../state';
 import { $, esc, hueOf, PLAY, toast } from '../util';
 import { openSong } from './song';
 
@@ -18,17 +18,18 @@ const nav = (attr: string, val: string | number, label: string, count: number, o
 
 const ICONS: Record<SideTab | 'settings', string> = {
   library: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+  albums: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/><path d="M12 3a9 9 0 0 1 9 9" stroke-opacity=".5"/></svg>',
   playlists: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h12M3 12h12M3 18h8"/><path d="M17 18V8l4-1"/><circle cx="15" cy="18" r="2"/></svg>',
   genres: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>',
   settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
 };
-const TAB_NAME: Record<SideTab, string> = { library: 'Library', playlists: 'Playlists', genres: 'Genres' };
+const TAB_NAME: Record<SideTab, string> = { library: 'Library', albums: 'Albums', playlists: 'Playlists', genres: 'Genres' };
 let panelOpen = true;
 let sideQuery = '';
 
 /** The icon rail (Library, Playlists, Genres, Settings) and the searchable panel beside it. */
 export function renderSide() {
-  const tabs: SideTab[] = ['library', 'playlists', 'genres'];
+  const tabs: SideTab[] = ['library', 'albums', 'playlists', 'genres'];
   $('#rail').innerHTML =
     tabs.map((k) => `<button class="rail-btn" data-st="${k}" aria-pressed="${panelOpen && state.sideTab === k}" title="${TAB_NAME[k]}" aria-label="${TAB_NAME[k]}">${ICONS[k]}</button>`).join('') +
     `<span class="rail-gap"></span><button class="rail-btn" id="openSet" title="Settings" aria-label="Settings">${ICONS.settings}</button>`;
@@ -48,6 +49,13 @@ export function renderSide() {
       nav('data-view', 'all', 'All music', n('all'), v.kind === 'all') +
       nav('data-view', 'ai', `Written with ${writerName()}`, n('ai'), v.kind === 'ai') +
       nav('data-view', 'library', 'My music', n('library'), v.kind === 'library');
+  if (state.sideTab === 'albums')
+    rows = albums()
+      .map((a) => {
+        const on = v.kind === 'album' && v.key === a.key;
+        return `<button class="nav album-row" data-album="${esc(a.key)}" aria-pressed="${on}"><span><span class="nm">${esc(a.name)}</span>${a.artist ? `<small>${esc(a.artist)}</small>` : ''}</span><span class="n">${a.songs.length}</span></button>`;
+      })
+      .join('') || '<p class="muted small side-empty">No albums yet.</p>';
   if (state.sideTab === 'playlists')
     rows = state.playlists.map((p) => nav('data-view', 'pl:' + p.id, p.name, p.songs.length, v.kind === 'pl' && v.id === p.id)).join('') ||
       '<p class="muted small side-empty">No playlists yet.</p>';
@@ -72,7 +80,10 @@ function filterSide() {
 export function renderHead() {
   const list = visible(), v = state.view;
   const p = v.kind === 'pl' ? state.playlists.find((x) => x.id === v.id) : undefined;
-  const title = p ? `<input id="plName" value="${esc(p.name)}" aria-label="Playlist name" size="${Math.max(6, p.name.length)}">` : `<h2>${esc(viewName())}</h2>`;
+  const al = v.kind === 'album' ? albums().find((a) => a.key === v.key) : undefined;
+  const title = p
+    ? `<input id="plName" value="${esc(p.name)}" aria-label="Playlist name" size="${Math.max(6, p.name.length)}">`
+    : `<h2>${esc(viewName())}</h2>${al?.artist ? `<span class="meta">${esc(al.artist)}</span>` : al && !al.artist ? '<span class="meta">Songs without an album</span>' : ''}`;
   $('#viewHead').innerHTML =
     title +
     `<span class="meta">${list.length} song${list.length === 1 ? '' : 's'}</span>` +
@@ -170,6 +181,14 @@ export function initLibrary(actions: { addFolder: () => void; request: () => voi
         toast(errText(err));
       }
       return;
+    }
+    const al = t.closest<HTMLElement>('[data-album]');
+    if (al) {
+      state.view = { kind: 'album', key: al.dataset.album! };
+      state.filter = 'all';
+      state.sort = 'recent';
+      ($('#sort') as HTMLSelectElement).value = 'recent';
+      return rerender();
     }
     const v = t.closest<HTMLElement>('[data-view]'), g = t.closest<HTMLElement>('[data-g]');
     if (v) {

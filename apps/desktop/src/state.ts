@@ -1,8 +1,8 @@
 // App state: the library snapshot from Rust plus what the person is looking at.
 import { api, type Snapshot, type Song, type WriterSettings } from './api';
 
-export type View = { kind: 'all' | 'ai' | 'library' } | { kind: 'pl'; id: number };
-export type SideTab = 'library' | 'playlists' | 'genres';
+export type View = { kind: 'all' | 'ai' | 'library' } | { kind: 'pl'; id: number } | { kind: 'album'; key: string };
+export type SideTab = 'library' | 'albums' | 'playlists' | 'genres';
 export type Repeat = 'off' | 'all' | 'one';
 
 export const state = {
@@ -57,6 +57,21 @@ export function genresInUse() {
   );
 }
 
+/** Songs without an album gather under this key in the album list. */
+export const SINGLES = '';
+export const albumKey = (s: Song) => (s.album.trim() ? `${s.album.trim().toLowerCase()}\u001f${s.artist.trim().toLowerCase()}` : SINGLES);
+
+/** Albums with their songs; songs without an album form "Singles", listed first. */
+export function albums() {
+  const map = new Map<string, { key: string; name: string; artist: string; songs: Song[] }>();
+  for (const s of state.songs) {
+    const key = albumKey(s);
+    if (!map.has(key)) map.set(key, { key, name: key === SINGLES ? 'Singles' : s.album.trim(), artist: key === SINGLES ? '' : s.artist, songs: [] });
+    map.get(key)!.songs.push(s);
+  }
+  return [...map.values()].sort((a, b) => Number(b.key === SINGLES) - Number(a.key === SINGLES) || a.name.localeCompare(b.name) || a.artist.localeCompare(b.artist));
+}
+
 export const playable = (s: Song) => s.hasAudio || s.notes.length > 0;
 
 function inView(s: Song) {
@@ -64,6 +79,7 @@ function inView(s: Song) {
   if (v.kind === 'ai') return s.source === 'ai';
   if (v.kind === 'library') return s.source === 'library';
   if (v.kind === 'pl') return !!state.playlists.find((p) => p.id === v.id)?.songs.includes(s.id);
+  if (v.kind === 'album') return albumKey(s) === v.key;
   return true;
 }
 
@@ -85,6 +101,7 @@ export function visible(): Song[] {
     case 'genre':
       return list.sort((a, b) => a.genre.localeCompare(b.genre) || a.title.localeCompare(b.title));
     default:
+      if (v.kind === 'album') return list.sort((a, b) => (a.track ?? 999) - (b.track ?? 999) || a.title.localeCompare(b.title));
       if (v.kind === 'pl') {
         const order = state.playlists.find((p) => p.id === v.id)?.songs ?? [];
         return list.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
@@ -96,6 +113,7 @@ export function visible(): Song[] {
 export function viewName() {
   const v = state.view;
   if (v.kind === 'pl') return state.playlists.find((p) => p.id === v.id)?.name ?? 'Playlist';
+  if (v.kind === 'album') return albums().find((a) => a.key === v.key)?.name ?? 'Album';
   const base = { all: 'All music', ai: `Written with ${writerName()}`, library: 'My music' }[v.kind];
   const g = state.genre === 'all' ? '' : genresInUse().find(([k]) => k === state.genre)?.[1].name;
   return g ? `${base}, ${g}` : base;

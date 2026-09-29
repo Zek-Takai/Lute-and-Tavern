@@ -148,7 +148,7 @@ function render() {
     <section class="set-sec">
       <fieldset class="choice" id="setSide">
         <legend>Sidebar opens on</legend>
-        ${[['library', 'Library'], ['playlists', 'Playlists'], ['genres', 'Genres']].map(([v, l]) => `<label><input type="radio" name="sideDefault" value="${v}" ${side === v ? 'checked' : ''}> ${l}</label>`).join('')}
+        ${[['library', 'Library'], ['albums', 'Albums'], ['playlists', 'Playlists'], ['genres', 'Genres']].map(([v, l]) => `<label><input type="radio" name="sideDefault" value="${v}" ${side === v ? 'checked' : ''}> ${l}</label>`).join('')}
       </fieldset>
     </section>`;
 
