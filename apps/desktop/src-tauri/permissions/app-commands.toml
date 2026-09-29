@@ -47,6 +47,7 @@ commands.allow = [
   "musickit_forget_key",
   "musickit_token",
   "save_external_song",
+  "close_signin_windows",
   "update_info",
   "check_update",
   "install_update",

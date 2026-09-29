@@ -51,7 +51,11 @@ export const isConnected = () => !!mk?.isAuthorized;
 /** Apple ID sign-in in Apple's own window. Afterwards the sign-in cookies are wiped from the app. */
 export async function connectApple() {
   const m = await musicKit();
-  await m.authorize();
+  try {
+    await m.authorize();
+  } finally {
+    await invoke('close_signin_windows').catch(() => {});
+  }
   await invoke('clear_web_data').catch(() => {});
   changed();
 }

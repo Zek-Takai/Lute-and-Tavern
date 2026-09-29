@@ -334,6 +334,16 @@ fn main_window(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Closes Apple's sign-in window once sign-in has finished (the page's own close request is not honored).
+#[tauri::command]
+fn close_signin_windows(app: tauri::AppHandle) {
+    for (label, w) in app.webview_windows() {
+        if label.starts_with("apple-signin-") {
+            let _ = w.close();
+        }
+    }
+}
+
 /// Saves a song from a streaming service (Apple Music) into the library, or returns it if it is there.
 #[tauri::command]
 async fn save_external_song(state: State<'_, AppState>, song: lt_core::library::ExternalSong) -> Res<Song> {
@@ -417,6 +427,7 @@ pub fn run() {
             musickit::musickit_forget_key,
             musickit::musickit_token,
             save_external_song,
+            close_signin_windows,
             updates::update_info,
             updates::check_update,
             updates::install_update,
