@@ -3,7 +3,7 @@
 import { api, lt, type Song, type Stem } from './api';
 import { BEATS, IDX, SCALE, keyName } from './music/notation';
 import { byId, playable, saveSetting, setting, viewName, type Repeat } from './state';
-import { $, esc, hueOf, PLAY, STOP, toast } from './util';
+import { $, esc, hueOf, PAUSE, PLAY, toast } from './util';
 
 let ac: AudioContext | null = null;
 let master: GainNode | null = null;
@@ -22,6 +22,11 @@ export let queue: Song[] = [];
 export let qi = -1;
 let queueFrom = '';
 export let repeat: Repeat = 'off';
+/** Paused keeps the song and its place; Stop clears the place. */
+export let paused = false;
+/** Where the next start of the current song begins (a restored position after relaunch). */
+let resumeAt = 0;
+let lastSaved = 0;
 
 /** Called with the index of the note sounding during a melody preview (-1 when it stops). */
 export let onMelodyNote: (song: Song, i: number) => void = () => {};
@@ -60,8 +65,93 @@ export function stop() {
     } else media?.pause();
     playing = null;
   }
-  $('#pProg').style.width = '0';
+  paused = false;
+  resumeAt = 0;
+  paintScrub(0, nowSong?.duration ?? 0);
+  saveNowPlaying();
   syncIcons();
+}
+
+function mediaEls(): HTMLMediaElement[] {
+  if (playing?.kind === 'file') return media ? [media] : [];
+  if (playing?.kind === 'stems') return playing.tracks.map((t) => t.el);
+  return [];
+}
+
+/** Current place and length of what is playing, or of the paused/restored song. */
+export function position() {
+  const e = mediaEls()[0];
+  const fallback = nowSong?.duration ?? 0;
+  if (!e) return { cur: resumeAt, dur: fallback };
+  return { cur: e.currentTime, dur: Number.isFinite(e.duration) && e.duration > 0 ? e.duration : fallback };
+}
+
+/** Pause or resume without losing the place. A melody preview simply stops. */
+export function togglePause() {
+  if (!playing) return;
+  if (playing.kind === 'synth') return stop();
+  const els = mediaEls();
+  if (paused) {
+    void ac?.resume();
+    const t = els[0]?.currentTime ?? 0;
+    for (const e of els) {
+      if (els.length > 1) e.currentTime = t;
+      void e.play();
+    }
+    paused = false;
+  } else {
+    for (const e of els) e.pause();
+    paused = true;
+  }
+  saveNowPlaying();
+  syncIcons();
+}
+
+/** Moves to a fraction of the song. Works on a paused or restored song too. */
+export function seekTo(fraction: number) {
+  const f = Math.max(0, Math.min(1, fraction));
+  const { dur } = position();
+  const els = mediaEls();
+  if (els.length && dur) for (const e of els) e.currentTime = f * dur;
+  else resumeAt = f * dur;
+  paintScrub(f * dur, dur);
+}
+
+const fmt = (sec: number) => {
+  if (!Number.isFinite(sec) || sec < 0) sec = 0;
+  const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+};
+let dragging = false;
+function paintScrub(cur: number, dur: number) {
+  const pct = dur ? Math.min(100, (cur / dur) * 100) : 0;
+  $('#pProg').style.width = pct + '%';
+  $('#pHead').style.left = pct + '%';
+  $('#pCur').textContent = fmt(cur);
+  $('#pDur').textContent = dur ? fmt(dur) : '0:00';
+}
+
+/** Remembers the song, its list and the place in it, so the app can pick up where it left off. */
+export function saveNowPlaying(force = true) {
+  if (!nowSong) return;
+  const now = Date.now();
+  if (!force && now - lastSaved < 10000) return;
+  lastSaved = now;
+  void saveSetting('nowPlaying', { songId: nowSong.id, queue: queue.map((s) => s.id), qi, from: queueFrom, pos: Math.round(position().cur * 10) / 10 });
+}
+
+/** On launch: shows the last song paused at its place; Play continues from there. */
+export function restoreNowPlaying() {
+  const np = setting<{ songId: number; queue: number[]; qi: number; from: string; pos: number } | null>('nowPlaying', null);
+  const s = np && byId(np.songId);
+  if (!np || !s) return;
+  queue = np.queue.map((id) => byId(id)).filter((x): x is Song => !!x && playable(x));
+  qi = queue.findIndex((x) => x.id === s.id);
+  queueFrom = np.from;
+  showNow(s, [s.artist, s.album].filter(Boolean).join(', '));
+  resumeAt = np.pos || 0;
+  lastPlay = () => playSong(s);
+  paintScrub(resumeAt, s.duration ?? 0);
 }
 
 export function playSong(s: Song, list?: Song[]) {
@@ -70,23 +160,21 @@ export function playSong(s: Song, list?: Song[]) {
     qi = queue.findIndex((x) => x.id === s.id);
     queueFrom = viewName();
   }
-  if (playing && playing.id === String(s.id)) {
-    stop();
-    return;
-  }
-  if (s.hasFile) playFile(lt('audio', s.id), s, [s.artist, s.album].filter(Boolean).join(', '), String(s.id));
-  else if (s.stems > 0) void playStems(s);
+  if (playing && playing.id === String(s.id)) return togglePause();
+  const startAt = nowSong?.id === s.id ? resumeAt : 0;
+  if (s.hasFile) playFile(lt('audio', s.id), s, [s.artist, s.album].filter(Boolean).join(', '), String(s.id), startAt);
+  else if (s.stems > 0) void playStems(s, startAt);
   else if (s.notes.length) playMelody(s);
   else toast('This song has no audio or melody yet.');
 }
 
 export function playTake(s: Song, takeId: number, label: string) {
   const key = `${s.id}:t${takeId}`;
-  if (playing && playing.id === key) return stop();
+  if (playing && playing.id === key) return togglePause();
   playFile(lt('take', takeId), s, label, key);
 }
 
-function playFile(url: string, s: Song, sub: string, id: string) {
+function playFile(url: string, s: Song, sub: string, id: string, startAt = 0) {
   stop();
   if (!ensureAudio()) return;
   void ac!.resume();
@@ -94,9 +182,6 @@ function playFile(url: string, s: Song, sub: string, id: string) {
     media = new Audio();
     media.crossOrigin = 'anonymous';
     ac!.createMediaElementSource(media).connect(master!);
-    media.ontimeupdate = () => {
-      if (playing?.kind === 'file' && media!.duration) $('#pProg').style.width = (media!.currentTime / media!.duration) * 100 + '%';
-    };
     media.onended = onEnded;
     media.onerror = () => {
       const e = media!.error;
@@ -104,14 +189,18 @@ function playFile(url: string, s: Song, sub: string, id: string) {
     };
   }
   media.src = url;
+  if (startAt > 0) media.addEventListener('loadedmetadata', () => (media!.currentTime = startAt), { once: true });
   media.play().catch((err) => {
     void api.logEvent('error', `play() rejected for ${url}: ${err?.name ?? ''} ${err?.message ?? err}`);
     stop();
     toast('This file could not be played. The format may not be supported.');
   });
   playing = { kind: 'file', id };
+  paused = false;
+  resumeAt = 0;
   showNow(s, sub);
-  lastPlay = () => playFile(url, s, sub, id);
+  lastPlay = () => playFile(url, s, sub, id, takeResume());
+  saveNowPlaying();
   syncIcons();
 }
 
@@ -150,7 +239,13 @@ export function pickStems(files: Stem[]) {
   return [...byName.values()];
 }
 
-export async function playStems(s: Song) {
+const takeResume = () => {
+  const r = resumeAt;
+  resumeAt = 0;
+  return r;
+};
+
+export async function playStems(s: Song, startAt = 0) {
   stop();
   if (!ensureAudio()) return;
   void ac!.resume();
@@ -169,9 +264,12 @@ export async function playStems(s: Song) {
   });
   const id = String(s.id);
   playing = { kind: 'stems', id, tracks };
+  paused = false;
+  resumeAt = 0;
   applyMix(s.id);
   showNow(s, `${tracks.length} stems${[s.artist].filter(Boolean).map((a) => ', ' + a).join('')}`);
-  lastPlay = () => void playStems(s);
+  lastPlay = () => void playStems(s, takeResume());
+  saveNowPlaying();
   syncIcons();
   // Start every part together once each can play, so they stay in step.
   await Promise.all(tracks.map((t) => new Promise<void>((res) => {
@@ -181,10 +279,8 @@ export async function playStems(s: Song) {
   })));
   if (playing?.kind !== 'stems' || playing.id !== id) return;
   const lead = tracks[0].el;
-  lead.ontimeupdate = () => {
-    if (playing?.kind === 'stems' && lead.duration) $('#pProg').style.width = (lead.currentTime / lead.duration) * 100 + '%';
-  };
   lead.onended = onEnded;
+  if (startAt > 0) for (const t of tracks) t.el.currentTime = startAt;
   await Promise.all(tracks.map((t) => t.el.play().catch((err) => api.logEvent('error', `stem ${t.name} play() rejected: ${err?.name ?? ''} ${err?.message ?? err}`))));
 }
 
@@ -217,12 +313,13 @@ export function playMelody(song: Song, semis = 0) {
     kind: 'synth', id: String(song.id), nodes,
     tick: window.setInterval(() => {
       const el = ac!.currentTime - t0;
-      $('#pProg').style.width = Math.min(100, (el / total) * 100) + '%';
+      paintScrub(Math.min(el, total), total);
       const i = times.findIndex((x, k) => el >= x && (k === times.length - 1 || el < times[k + 1]));
       if (i !== lastNote) onMelodyNote(song, (lastNote = i));
       if (el > total + 0.1) onEnded();
     }, 60),
   };
+  paused = false;
   showNow(song, `Melody preview${song.key ? ', ' + keyName(song.key, semis) : ''}`);
   lastPlay = () => playMelody(song, semis);
   syncIcons();
@@ -268,26 +365,108 @@ export function step(dir: 1 | -1) {
 }
 
 export function togglePlay(fallback: Song[]) {
-  if (playing) return stop();
+  if (playing) return togglePause();
   if (lastPlay) return lastPlay();
   const l = fallback.filter(playable);
   if (l.length) playSong(l[0], l);
 }
 
-export function setRepeat(m: Exclude<Repeat, 'off'>) {
-  repeat = repeat === m ? 'off' : m;
+const REPEAT_ICON = (one: boolean) =>
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l3 3-3 3"/><path d="M4 11V9a4 4 0 0 1 4-4h12"/><path d="M7 22l-3-3 3-3"/><path d="M20 13v2a4 4 0 0 1-4 4H4"/>${one ? '<text x="12" y="15.5" text-anchor="middle" font-size="8.5" font-weight="700" fill="currentColor" stroke="none" font-family="Instrument Sans, sans-serif">1</text>' : ''}</svg>`;
+const REPEAT_LABEL = { off: 'Repeat is off', all: 'Repeating the list', one: 'Repeating this song' };
+
+/** One button: off, then repeat the list, then repeat this song, then off. */
+export function cycleRepeat() {
+  repeat = repeat === 'off' ? 'all' : repeat === 'all' ? 'one' : 'off';
   void saveSetting('repeat', repeat);
   syncRepeat();
-  toast(repeat === 'all' ? 'Repeat playlist on' : repeat === 'one' ? 'Repeat song on' : 'Repeat off');
+  toast(REPEAT_LABEL[repeat]);
 }
 function syncRepeat() {
-  $('#rAll').setAttribute('aria-pressed', String(repeat === 'all'));
-  $('#rOne').setAttribute('aria-pressed', String(repeat === 'one'));
+  const b = $('#rMode');
+  b.innerHTML = REPEAT_ICON(repeat === 'one');
+  b.setAttribute('aria-pressed', String(repeat !== 'off'));
+  b.setAttribute('aria-label', REPEAT_LABEL[repeat]);
+  b.title = REPEAT_LABEL[repeat];
 }
+
 export function initPlayer() {
   repeat = setting<Repeat>('repeat', 'off');
   syncRepeat();
+  applySkin(setting<string>('playerSkin', 'classic'));
   $('#pBtn').innerHTML = PLAY;
+  // The scrubber: click anywhere to jump, or drag the handle.
+  const bar = $('#pBar');
+  const frac = (e: PointerEvent) => {
+    const r = bar.getBoundingClientRect();
+    return (e.clientX - r.left) / r.width;
+  };
+  bar.addEventListener('pointerdown', (e) => {
+    if (!nowSong) return;
+    dragging = true;
+    bar.classList.add('drag');
+    bar.setPointerCapture(e.pointerId);
+    const { dur } = position();
+    paintScrub(Math.max(0, Math.min(1, frac(e))) * dur, dur);
+  });
+  bar.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const { dur } = position();
+    paintScrub(Math.max(0, Math.min(1, frac(e))) * dur, dur);
+  });
+  const end = (e: PointerEvent) => {
+    if (!dragging) return;
+    dragging = false;
+    bar.classList.remove('drag');
+    seekTo(frac(e));
+    saveNowPlaying();
+  };
+  bar.addEventListener('pointerup', end);
+  bar.addEventListener('pointercancel', end);
+  addEventListener('beforeunload', () => saveNowPlaying());
+  requestAnimationFrame(tick);
+}
+
+const spec = new Uint8Array(512);
+function tick() {
+  requestAnimationFrame(tick);
+  if (playing && playing.kind !== 'synth' && !dragging) {
+    const { cur, dur } = position();
+    paintScrub(cur, dur);
+    if (!paused) saveNowPlaying(false);
+  }
+  drawSpectrum();
+}
+
+/** Player bar looks; "classic" is the original. */
+export const SKINS = [
+  ['classic', 'Classic', 'The original bar across the bottom.'],
+  ['float', 'Floating glass', 'A rounded glass bar that floats above the bottom edge, with a bold play button.'],
+  ['aurora', 'Aurora', 'A glowing gradient scrubber with the music’s spectrum rising behind the bar.'],
+  ['minimal', 'Minimal', 'No panel at all: slim controls sitting over the background.'],
+] as const;
+export function applySkin(skin: string) {
+  $('.player').dataset.skin = SKINS.some(([k]) => k === skin) ? skin : 'classic';
+}
+function drawSpectrum() {
+  const c = document.getElementById('pSpec') as HTMLCanvasElement | null;
+  if (!c || $('.player').dataset.skin !== 'aurora') return;
+  const w = (c.width = c.clientWidth), h = (c.height = c.clientHeight);
+  const x = c.getContext('2d')!;
+  x.clearRect(0, 0, w, h);
+  if (!analyser || !playing || paused) return;
+  analyser.getByteFrequencyData(spec);
+  const n = 64, bw = w / n;
+  const g = x.createLinearGradient(0, 0, w, 0);
+  g.addColorStop(0, 'rgba(154,166,255,.55)');
+  g.addColorStop(0.5, 'rgba(94,231,223,.5)');
+  g.addColorStop(1, 'rgba(255,126,182,.55)');
+  x.fillStyle = g;
+  for (let i = 0; i < n; i++) {
+    const v = spec[Math.floor(Math.pow(i / n, 1.6) * 300) + 1] / 255;
+    const bh = Math.max(1, v * h * 0.95);
+    x.fillRect(i * bw + 1, h - bh, bw - 2, bh);
+  }
 }
 
 function showNow(s: Song, sub: string) {
@@ -308,11 +487,13 @@ export function refreshQueue() {
 
 export function syncIcons() {
   document.querySelectorAll<HTMLElement>('[data-play]').forEach((b) => {
-    const on = !!playing && playing.id === b.dataset.play;
-    b.innerHTML = on ? STOP : PLAY;
-    b.setAttribute('aria-label', on ? 'Stop' : 'Play');
+    const on = !!playing && playing.id === b.dataset.play && !paused;
+    b.innerHTML = on ? PAUSE : PLAY;
+    b.setAttribute('aria-label', on ? 'Pause' : 'Play');
   });
-  $('#pBtn').innerHTML = playing ? STOP : PLAY;
+  const live = !!playing && !paused;
+  $('#pBtn').innerHTML = live ? PAUSE : PLAY;
+  $('#pBtn').setAttribute('aria-label', live ? 'Pause' : 'Play');
   renderQueue();
 }
 
@@ -431,17 +612,4 @@ function drawEq() {
     const h = Math.max(3, eqLv[i] * 34);
     x.fillRect(2 + i * 11, 36 - h, 7, h);
   });
-}
-
-/** Click on the progress bar to seek. */
-export function initSeek() {
-  $('#pBar').onclick = (e) => {
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const f = (e.clientX - r.left) / r.width;
-    if (playing?.kind === 'file' && media?.duration) media.currentTime = f * media.duration;
-    if (playing?.kind === 'stems') {
-      const d = playing.tracks[0].el.duration;
-      if (d) for (const t of playing.tracks) t.el.currentTime = f * d;
-    }
-  };
 }

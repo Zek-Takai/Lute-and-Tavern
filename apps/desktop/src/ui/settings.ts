@@ -2,6 +2,7 @@
 import { audioDir, join } from '@tauri-apps/api/path';
 import { open as pickFolder } from '@tauri-apps/plugin-dialog';
 import { api, errText, type UpdateInfo } from '../api';
+import { applySkin, SKINS } from '../player';
 import { libraryFolder, reload, rerender, saveSetting, state } from '../state';
 import { $, esc, toast } from '../util';
 
@@ -136,6 +137,13 @@ function render() {
     </section>
 
     <section class="set-sec">
+      <fieldset class="choice" id="setSkin">
+        <legend>Player bar</legend>
+        ${SKINS.map(([k, l, d]) => `<label><input type="radio" name="playerSkin" value="${k}" ${((state.settings.playerSkin as string) || 'classic') === k ? 'checked' : ''}> <span><b>${l}</b><br><span class="muted small">${d}</span></span></label>`).join('')}
+      </fieldset>
+    </section>
+
+    <section class="set-sec">
       <fieldset class="choice" id="setSide">
         <legend>Sidebar opens on</legend>
         ${[['library', 'Library'], ['playlists', 'Playlists'], ['genres', 'Genres']].map(([v, l]) => `<label><input type="radio" name="sideDefault" value="${v}" ${side === v ? 'checked' : ''}> ${l}</label>`).join('')}
@@ -244,6 +252,11 @@ function render() {
     } catch (e) {
       st(errText(e));
     }
+  };
+  $('#setSkin').onchange = (e) => {
+    const v = (e.target as HTMLInputElement).value;
+    applySkin(v);
+    void saveSetting('playerSkin', v);
   };
   $('#setSide').onchange = async (e) => {
     const v = (e.target as HTMLInputElement).value;
