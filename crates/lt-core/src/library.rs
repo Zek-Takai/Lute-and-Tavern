@@ -1268,6 +1268,7 @@ impl Library {
             params![song, id, t],
         )?;
         drop(db);
+        self.art_from_takes(song)?;
         self.write_sidecar(song)?;
         Ok(Take {
             id,
@@ -1438,6 +1439,7 @@ impl Library {
             "UPDATE songs SET updated_at = ?2 WHERE id = ?1",
             params![song, now()],
         )?;
+        self.art_from_takes(song)?;
         self.write_sidecar(song)?;
         Ok(report)
     }
@@ -1574,7 +1576,55 @@ impl Library {
             "UPDATE songs SET master_take = ?2, updated_at = ?3 WHERE id = ?1",
             params![song, take, now()],
         )?;
+        self.art_from_takes(song)?;
         Ok(())
+    }
+
+    /// A song without artwork takes the cover embedded in its audio: the master take first, then other takes,
+    /// then its stems (Suno embeds the cover in MP3 downloads, not in M4A or WAV). Returns true when art was added.
+    pub fn art_from_takes(&self, song: i64) -> Result<bool> {
+        let paths: Vec<String> = {
+            let db = self.db();
+            let has_art: bool = db.query_row("SELECT art IS NOT NULL FROM songs WHERE id = ?1", [song], |r| r.get(0))?;
+            if has_art {
+                return Ok(false);
+            }
+            let mut st = db.prepare(
+                "SELECT t.path FROM takes t JOIN songs s ON s.id = t.song_id WHERE t.song_id = ?1 \
+                 ORDER BY t.id = s.master_take DESC, t.id DESC",
+            )?;
+            let mut paths: Vec<String> = st.query_map([song], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+            let mut st = db.prepare("SELECT path FROM stems WHERE song_id = ?1 ORDER BY lower(path) LIKE '%.mp3' DESC, id")?;
+            paths.extend(st.query_map([song], |r| r.get::<_, String>(0))?.flatten());
+            paths
+        };
+        for p in paths {
+            if let Some((bytes, ext)) = tags::read_track(Path::new(&p), None).picture {
+                let name = self.store_art(&bytes, ext)?;
+                self.db().execute("UPDATE songs SET art = ?2, updated_at = ?3 WHERE id = ?1", params![song, name, now()])?;
+                self.write_cover(song)?;
+                self.write_sidecar(song)?;
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Fills in artwork from takes or stems for songs that have none (songs from before this existed).
+    pub fn backfill_take_art(&self) -> Result<usize> {
+        let ids: Vec<i64> = {
+            let db = self.db();
+            let mut st = db.prepare(
+                "SELECT id FROM songs WHERE art IS NULL AND (EXISTS (SELECT 1 FROM takes t WHERE t.song_id = songs.id) \
+                 OR EXISTS (SELECT 1 FROM stems st WHERE st.song_id = songs.id))",
+            )?;
+            st.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?
+        };
+        let mut n = 0;
+        for id in ids {
+            n += self.art_from_takes(id)? as usize;
+        }
+        Ok(n)
     }
 
     pub fn set_status(&self, song: i64, status: &str) -> Result<()> {
