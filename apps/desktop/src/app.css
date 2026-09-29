@@ -95,8 +95,6 @@ nav.rail { position: sticky; top: 16px; display: flex; flex-direction: column; a
   .rail-gap { flex: 1; }
   .side { height: auto; max-height: 50vh; }
 }
-.layout.sidebar-hidden { grid-template-columns: minmax(0, 1fr); }
-.layout.sidebar-hidden > nav.rail, .layout.sidebar-hidden > .side { display: none; }
 #sideToggle[aria-pressed="false"] { color: var(--ink-2); }
 .player[data-line="rainbow"] .scrub .track i { background: linear-gradient(90deg, #ff5e7e, #ffb347, #ffe66d, #5ee7a0, #5ec8ff, #9a7bff); }
 .player[data-line="white"] .scrub .track i { background: #fff; box-shadow: none; }

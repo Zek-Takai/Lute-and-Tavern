@@ -25,6 +25,7 @@ const ICONS: Record<SideTab | 'settings', string> = {
 };
 const TAB_NAME: Record<SideTab, string> = { library: 'Library', albums: 'Albums', playlists: 'Playlists', genres: 'Genres' };
 let panelOpen = true;
+let panelLoaded = false;
 let sideQuery = '';
 
 /** The icon rail (Library, Playlists, Genres, Settings) and the searchable panel beside it. */
@@ -33,12 +34,14 @@ export function renderSide() {
   $('#rail').innerHTML =
     tabs.map((k) => `<button class="rail-btn" data-st="${k}" aria-pressed="${panelOpen && state.sideTab === k}" title="${TAB_NAME[k]}" aria-label="${TAB_NAME[k]}">${ICONS[k]}</button>`).join('') +
     `<span class="rail-gap"></span><button class="rail-btn" id="openSet" title="Settings" aria-label="Settings">${ICONS.settings}</button>`;
+  if (!panelLoaded) {
+    panelLoaded = true;
+    panelOpen = state.settings.sidePanelOpen !== false;
+  }
   $('#layout').classList.toggle('panel-closed', !panelOpen);
-  const hidden = !!state.settings.sidebarHidden;
-  $('#layout').classList.toggle('sidebar-hidden', hidden);
   const tg = $('#sideToggle');
-  tg.setAttribute('aria-pressed', String(!hidden));
-  tg.title = tg.ariaLabel = hidden ? 'Show the sidebar' : 'Hide the sidebar';
+  tg.setAttribute('aria-pressed', String(panelOpen));
+  tg.title = tg.ariaLabel = panelOpen ? 'Hide the list' : 'Show the list';
   $('#side').hidden = !panelOpen;
   if (!panelOpen) return;
   const n = (k: string) => state.songs.filter((s) => k === 'all' || s.source === k).length;
@@ -151,13 +154,15 @@ export function initLibrary(actions: { addFolder: () => void; request: () => voi
     const k = tab.dataset.st as SideTab;
     // Clicking the open tab again folds the panel away for more room.
     panelOpen = !(panelOpen && state.sideTab === k);
+    void saveSetting('sidePanelOpen', panelOpen);
     state.sideTab = k;
     if (panelOpen) sideQuery = '';
     renderSide();
     if (panelOpen) $('#sideFind')?.focus();
   };
-  $('#sideToggle').onclick = async () => {
-    await saveSetting('sidebarHidden', !state.settings.sidebarHidden);
+  $('#sideToggle').onclick = () => {
+    panelOpen = !panelOpen;
+    void saveSetting('sidePanelOpen', panelOpen);
     renderSide();
   };
   $('#side').addEventListener('input', (e) => {
