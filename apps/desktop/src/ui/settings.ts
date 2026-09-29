@@ -1,6 +1,6 @@
 // Settings: the songwriter connection, music folders, genre tags and the sidebar's starting tab.
 import { audioDir, join } from '@tauri-apps/api/path';
-import { open as pickFolder } from '@tauri-apps/plugin-dialog';
+import { message, open as pickFolder } from '@tauri-apps/plugin-dialog';
 import { api, errText, type McpInfo, type UpdateInfo } from '../api';
 import { applyLineColor, applySkin, LINE_COLORS, SKINS } from '../player';
 import { appleStatus, connectApple, disconnectApple, forgetAppleKey, isConnected, musicKit, setAppleKey, type AppleStatus } from '../apple';
@@ -335,8 +335,11 @@ function render() {
     try {
       const r = await api.convertStemsToFlac(null);
       const mb = (b: number) => `${Math.round(b / 1048576)} MB`;
-      st(r.count ? `Converted ${r.count} stem${r.count === 1 ? '' : 's'}: ${mb(r.bytesBefore)} became ${mb(r.bytesAfter)}.` : 'No WAV stems to convert.');
+      const kept = r.keptWav.length ? ` ${r.keptWav.length} stayed WAV.` : '';
+      st(r.converted ? `Converted ${r.converted} stem${r.converted === 1 ? '' : 's'}: ${mb(r.bytesBefore)} became ${mb(r.bytesAfter)}.${kept}` : r.keptWav.length ? `Nothing converted.${kept}` : 'No WAV stems to convert.');
       await reload();
+      if (r.keptWav.length)
+        await message(`These WAV stems were kept because they could not be converted exactly:\n\n${r.keptWav.join('\n')}`, { title: 'Some stems stayed WAV', kind: 'warning' });
     } catch (e) {
       st(errText(e));
     }

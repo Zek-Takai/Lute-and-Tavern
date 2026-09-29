@@ -49,6 +49,15 @@ pub fn wav_to_flac(src: &Path, dest: &Path) -> Result<bool> {
     Ok(true)
 }
 
+/// `wav_to_flac` with the reason in words when a file stays WAV.
+pub fn try_wav_to_flac(src: &Path, dest: &Path) -> std::result::Result<(), String> {
+    match wav_to_flac(src, dest) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err("it uses 32-bit or floating-point samples, which FLAC can't store exactly".into()),
+        Err(e) => Err(format!("{e:#}")),
+    }
+}
+
 fn decodes_to(flac: &Path, want: &[i32], channels: usize, rate: usize) -> Result<bool> {
     let mut r = claxon::FlacReader::open(flac)?;
     let info = r.streaminfo();

@@ -267,6 +267,25 @@ pub struct Draft {
     pub chords: Option<Vec<String>>,
 }
 
+/// What attaching stems did; `kept_wav` says which WAVs could not become FLAC, and why.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Attached {
+    pub count: usize,
+    pub flac: usize,
+    pub kept_wav: Vec<String>,
+}
+
+/// What converting the library's WAV stems did.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlacReport {
+    pub converted: usize,
+    pub bytes_before: u64,
+    pub bytes_after: u64,
+    pub kept_wav: Vec<String>,
+}
+
 pub struct Library {
     conn: Mutex<Connection>,
     pub dirs: DataDirs,
@@ -1284,7 +1303,7 @@ impl Library {
     /// Attaches stem files to a song; a folder brings every audio file inside it. Files already in the
     /// library folder move over, and any song they had become on their own is removed; others are copied.
     /// `to_flac`: store WAV files as FLAC (same audio, about half the size).
-    pub fn attach_stems(&self, song: i64, paths: &[PathBuf], to_flac: bool) -> Result<usize> {
+    pub fn attach_stems(&self, song: i64, paths: &[PathBuf], to_flac: bool) -> Result<Attached> {
         let title = self.song(song)?.title;
         let files = audio_files_in(paths)?;
         if files.is_empty() {
@@ -1301,6 +1320,7 @@ impl Library {
                     r.get(0)
                 })?;
         let mut emptied = Vec::new();
+        let mut report = Attached { count: files.len(), ..Default::default() };
         for src in &files {
             let part = stem_part_name(src, &title);
             let ext = src
@@ -1317,7 +1337,17 @@ impl Library {
                         &format!("{}.flac", crate::organize::clean_name(&part)),
                     )
                 })
-                .filter(|f| crate::audio::wav_to_flac(src, f).unwrap_or(false));
+                .filter(|f| match crate::audio::try_wav_to_flac(src, f) {
+                    Ok(()) => {
+                        report.flac += 1;
+                        true
+                    }
+                    Err(why) => {
+                        let name = src.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                        report.kept_wav.push(format!("{name}: {why}"));
+                        false
+                    }
+                });
             let dest = match flac {
                 Some(f) => f,
                 None => unique_path(
@@ -1409,26 +1439,27 @@ impl Library {
             params![song, now()],
         )?;
         self.write_sidecar(song)?;
-        Ok(files.len())
+        Ok(report)
     }
 
     /// Converts WAV stems already in the library to FLAC (all songs, or one). The WAV is deleted only after
-    /// its FLAC copy decodes to exactly the same samples. Returns (converted, bytes before, bytes after).
-    pub fn convert_stems_to_flac(&self, song: Option<i64>) -> Result<(usize, u64, u64)> {
+    /// its FLAC copy decodes to exactly the same samples. WAVs that can't convert are listed in `kept_wav`.
+    pub fn convert_stems_to_flac(&self, song: Option<i64>) -> Result<FlacReport> {
         let rows: Vec<(i64, String)> = {
             let db = self.db();
             let mut st = db.prepare("SELECT id, path FROM stems WHERE (?1 IS NULL OR song_id = ?1) AND lower(path) LIKE '%.wav'")?;
             st.query_map([song], |r| Ok((r.get(0)?, r.get(1)?)))?
                 .collect::<rusqlite::Result<_>>()?
         };
-        let (mut n, mut before, mut after) = (0, 0, 0);
+        let mut report = FlacReport::default();
         let mut songs = std::collections::BTreeSet::new();
         for (id, path) in rows {
             let wav = PathBuf::from(&path);
             let Some(dir) = wav.parent() else { continue };
             let name = wav.file_stem().and_then(|s| s.to_str()).unwrap_or("Stem");
             let flac = unique_path(dir, &format!("{name}.flac"));
-            if !crate::audio::wav_to_flac(&wav, &flac)? {
+            if let Err(why) = crate::audio::try_wav_to_flac(&wav, &flac) {
+                report.kept_wav.push(format!("{}: {why}", wav.display()));
                 continue;
             }
             let (b, a) = (
@@ -1452,14 +1483,14 @@ impl Library {
             };
             std::fs::remove_file(&wav)?;
             songs.insert(owner);
-            n += 1;
-            before += b;
-            after += a;
+            report.converted += 1;
+            report.bytes_before += b;
+            report.bytes_after += a;
         }
         for id in songs {
             self.write_sidecar(id)?;
         }
-        Ok((n, before, after))
+        Ok(report)
     }
 
     /// Songs and stems inside the library folder whose file is a byte-for-byte copy of `src`.
@@ -1982,7 +2013,7 @@ mod tests {
         ] {
             std::fs::write(src.join(f), b"x").unwrap();
         }
-        assert_eq!(l.attach_stems(s.id, &[src.clone()], false).unwrap(), 3);
+        assert_eq!(l.attach_stems(s.id, &[src.clone()], false).unwrap().count, 3);
         let mut names: Vec<String> = l
             .song_detail(s.id)
             .unwrap()
@@ -2000,6 +2031,11 @@ mod tests {
             l.attach_stems(s.id, &[d.path().join("nothing-here")], false)
                 .is_err()
         );
+        let bad = d.path().join("Broken (Synth).wav");
+        std::fs::write(&bad, b"not really a wav").unwrap();
+        let r = l.attach_stems(s.id, &[bad], true).unwrap();
+        assert_eq!((r.count, r.flac, r.kept_wav.len()), (1, 0, 1), "a WAV that can't convert is kept and reported");
+        assert!(r.kept_wav[0].starts_with("Broken (Synth).wav: "), "{:?}", r.kept_wav);
     }
 
     #[test]
@@ -2024,7 +2060,7 @@ mod tests {
             false,
         )
         .unwrap();
-        assert_eq!(l.attach_stems(s.id, &[stray.clone()], false).unwrap(), 1);
+        assert_eq!(l.attach_stems(s.id, &[stray.clone()], false).unwrap().count, 1);
         let songs = l.songs().unwrap();
         assert_eq!(songs.len(), 1, "the stray song is gone");
         assert_eq!(songs[0].stems, 1);

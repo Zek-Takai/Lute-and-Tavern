@@ -286,7 +286,7 @@ async fn delete_take(state: State<'_, AppState>, take: i64) -> Res<()> {
 
 /// Attaches stem files, or whole folders of them, to a song.
 #[tauri::command]
-async fn attach_stems(state: State<'_, AppState>, song: i64, paths: Vec<String>, to_flac: bool) -> Res<usize> {
+async fn attach_stems(state: State<'_, AppState>, song: i64, paths: Vec<String>, to_flac: bool) -> Res<lt_core::library::Attached> {
     blocking(&state, move |l| l.attach_stems(song, &paths.into_iter().map(PathBuf::from).collect::<Vec<_>>(), to_flac)).await
 }
 
@@ -300,22 +300,10 @@ async fn stems_wav_count(state: State<'_, AppState>, paths: Vec<String>) -> Res<
     .await
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Converted {
-    count: usize,
-    bytes_before: u64,
-    bytes_after: u64,
-}
-
 /// Converts WAV stems already in the library to FLAC (one song, or all when `song` is empty).
 #[tauri::command]
-async fn convert_stems_to_flac(state: State<'_, AppState>, song: Option<i64>) -> Res<Converted> {
-    blocking(&state, move |l| {
-        let (count, bytes_before, bytes_after) = l.convert_stems_to_flac(song)?;
-        Ok(Converted { count, bytes_before, bytes_after })
-    })
-    .await
+async fn convert_stems_to_flac(state: State<'_, AppState>, song: Option<i64>) -> Res<lt_core::library::FlacReport> {
+    blocking(&state, move |l| l.convert_stems_to_flac(song)).await
 }
 
 #[tauri::command]

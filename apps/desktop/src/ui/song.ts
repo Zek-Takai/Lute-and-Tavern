@@ -1,5 +1,5 @@
 // The song popup: Song (Suno fields), Talk to the songwriter, Sheet music, Takes, Details, Versions.
-import { ask, open as pickFile } from '@tauri-apps/plugin-dialog';
+import { ask, message, open as pickFile } from '@tauri-apps/plugin-dialog';
 import { api, errText, lt, type SongDetail } from '../api';
 import { keyName } from '../music/notation';
 import { pickStems, playing, playSong, playStems, playTake, setStemMix, stemMix, stop, syncIcons } from '../player';
@@ -77,9 +77,11 @@ function wireAttachStems(b: HTMLElement, s: SongDetail, afterChange: () => Promi
     try {
       const toFlac = await chooseFlac(paths);
       if (toFlac == null) return;
-      const n = await api.attachStems(s.id, paths, toFlac);
+      const r = await api.attachStems(s.id, paths, toFlac);
       await afterChange();
-      toast(`${n} stem${n === 1 ? '' : 's'} attached to "${s.title}"`);
+      toast(`${r.count} stem${r.count === 1 ? '' : 's'} attached to "${s.title}"${r.flac ? `, ${r.flac} stored as FLAC` : ''}`);
+      if (r.keptWav.length)
+        await message(`${r.keptWav.length} WAV file${r.keptWav.length === 1 ? ' was' : 's were'} kept as WAV because they could not be converted exactly:\n\n${r.keptWav.join('\n')}`, { title: 'Some stems stayed WAV', kind: 'warning' });
     } catch (e) {
       toast(errText(e));
     }
