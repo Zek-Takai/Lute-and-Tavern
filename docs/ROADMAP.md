@@ -17,8 +17,9 @@
     (ALAC) and AIFF, and Linux depends on the installed GStreamer codecs. Check what the engine can play at startup
     (`canPlayType`) and fall back to a built-in decoder (Symphonia, pure Rust: MP3, AAC, ALAC, FLAC, Vorbis, WAV,
     AIFF; libopus for Opus-in-M4A) served through the `lt://` protocol, so seeking and the visualizer keep working.
-  - WMA: no built-in decoder (legacy format). Say clearly that it can't play and offer to convert it to FLAC or MP3,
-    using the person's own FFmpeg when one is installed.
+  - Decided: the small decoders ship inside the app (about 2 MB) so every common format plays offline on any
+    system. Big optional tools are never bundled or downloaded: if the person has FFmpeg installed, the app uses it
+    (WMA and other rare formats); if not, it says clearly the file can't play here and how to convert it.
 - Sheet music from audio (optional tool, low priority: sheet music is for people who read it; the app's owner does not).
   Plan when it is built: use the song's Suno vocal stem when present, else split locally with Spleeter (MIT);
   vocal to notes with RMVPE (Apache-2.0), tempo with Beat This! (MIT); lyrics placed from the known words.
