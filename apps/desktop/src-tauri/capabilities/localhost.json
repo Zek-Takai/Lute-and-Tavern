@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "localhost",
+  "description": "The installed app's interface, served from localhost so Apple Music sign-in works",
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "http://localhost:17654",
+      "http://localhost:17654/*"
+    ]
+  },
+  "permissions": [
+    "core:default",
+    "dialog:default"
+  ]
+}

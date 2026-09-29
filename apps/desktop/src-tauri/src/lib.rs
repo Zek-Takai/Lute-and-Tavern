@@ -297,11 +297,21 @@ pub fn emit_library_changed(app: &tauri::AppHandle) {
     let _ = app.emit("library-changed", ());
 }
 
+/// Port the installed app serves its interface on (only reachable from this computer).
+const LOCALHOST_PORT: u16 = 17654;
+
 /// The main window. Made in code so Apple's sign-in popup (opened by MusicKit) can open as a real
 /// window that talks back to the app; any other popup is refused.
 fn main_window(app: &tauri::App) -> tauri::Result<()> {
     let handle = app.handle().clone();
-    tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+    // Apple's sign-in only answers pages served over http(s). Development already runs on the Vite server;
+    // installed builds serve the interface from localhost (see LOCALHOST_PORT) instead of tauri://.
+    let url = if cfg!(debug_assertions) {
+        tauri::WebviewUrl::App("index.html".into())
+    } else {
+        tauri::WebviewUrl::External(format!("http://localhost:{LOCALHOST_PORT}").parse().expect("static url"))
+    };
+    tauri::WebviewWindowBuilder::new(app, "main", url)
         .title("Lute & Tavern")
         .inner_size(1320.0, 860.0)
         .min_inner_size(900.0, 600.0)
@@ -334,6 +344,7 @@ async fn save_external_song(state: State<'_, AppState>, song: lt_core::library::
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_localhost::Builder::new(LOCALHOST_PORT).build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updates::Pending::default())
         .manage(musickit::TokenCache::default())
