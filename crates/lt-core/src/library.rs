@@ -65,12 +65,17 @@ pub struct Song {
     pub master_take: Option<i64>,
     pub notes: serde_json::Value,
     pub chords: Vec<String>,
+    /// The song has its own audio file or a take (not only stems).
+    pub has_file: bool,
+    /// Number of stem files (vocals, drums...) attached to the song.
+    pub stems: i64,
 }
 
 const SONG_COLS: &str = "s.id, s.source, s.title, s.artist, s.album, s.year, s.genre, s.track, s.duration, \
-    (s.path IS NOT NULL OR s.master_take IS NOT NULL OR EXISTS (SELECT 1 FROM takes t WHERE t.song_id = s.id)), \
+    (s.path IS NOT NULL OR EXISTS (SELECT 1 FROM takes t WHERE t.song_id = s.id) OR EXISTS (SELECT 1 FROM stems st WHERE st.song_id = s.id)), \
     s.art, s.added_at, s.updated_at, s.request, s.status, s.sub_genre, s.song_key, s.bpm, s.style, s.exclude, s.lyrics, \
-    s.master_take, s.notes_json, s.chords_json";
+    s.master_take, s.notes_json, s.chords_json, \
+    (s.path IS NOT NULL OR EXISTS (SELECT 1 FROM takes t WHERE t.song_id = s.id)), (SELECT COUNT(*) FROM stems st WHERE st.song_id = s.id)";
 
 fn song_from_row(r: &Row) -> rusqlite::Result<Song> {
     let notes: String = r.get(22)?;
@@ -100,6 +105,8 @@ fn song_from_row(r: &Row) -> rusqlite::Result<Song> {
         master_take: r.get(21)?,
         notes: serde_json::from_str(&notes).unwrap_or(serde_json::Value::Array(vec![])),
         chords: serde_json::from_str(&chords).unwrap_or_default(),
+        has_file: r.get(24)?,
+        stems: r.get(25)?,
     })
 }
 
@@ -140,6 +147,15 @@ pub struct Sheet {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Stem {
+    pub id: i64,
+    pub name: String,
+    /// File extension, e.g. "wav" or "mp3"; one part can arrive in both.
+    pub format: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SongDetail {
     #[serde(flatten)]
     pub song: Song,
@@ -148,6 +164,7 @@ pub struct SongDetail {
     pub messages: Vec<Message>,
     pub sheets: Vec<Sheet>,
     pub playlists: Vec<i64>,
+    pub stem_files: Vec<Stem>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -264,7 +281,15 @@ impl Library {
             .prepare("SELECT playlist_id FROM playlist_songs WHERE song_id = ?1")?
             .query_map([id], |r| r.get(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(SongDetail { song, takes, versions, messages, sheets, playlists })
+        let stem_files = db
+            .prepare("SELECT id, name, path FROM stems WHERE song_id = ?1 ORDER BY name COLLATE NOCASE, path")?
+            .query_map([id], |r| {
+                let path: String = r.get(2)?;
+                let format = Path::new(&path).extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+                Ok(Stem { id: r.get(0)?, name: r.get(1)?, format })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(SongDetail { song, takes, versions, messages, sheets, playlists, stem_files })
     }
 
     pub fn update_song(&self, id: i64, p: &SongPatch) -> Result<Song> {
@@ -363,11 +388,17 @@ impl Library {
         let root = PathBuf::from(&folder.path);
         let mut report = ScanReport::default();
         let mut seen = std::collections::HashSet::new();
-        for entry in walkdir::WalkDir::new(&root).follow_links(true).into_iter().filter_map(|e| e.ok()) {
-            let path = entry.path();
-            if !entry.file_type().is_file() || !tags::is_audio(path) || is_hidden(path.strip_prefix(&root).unwrap_or(path)) {
-                continue;
-            }
+        let mut files: Vec<PathBuf> = walkdir::WalkDir::new(&root)
+            .follow_links(true)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file() && tags::is_audio(e.path()) && !is_hidden(e.path().strip_prefix(&root).unwrap_or(e.path())))
+            .map(|e| e.into_path())
+            .collect();
+        // Whole songs first, so stems find the song they belong to.
+        files.sort_by_key(|p| (tags::stem_of(p).is_some(), p.clone()));
+        for path in &files {
+            let path = path.as_path();
             seen.insert(path.to_string_lossy().to_string());
             match self.import_file(path, Some(folder.id), Some(&root))? {
                 Imported::Added { untagged } => {
@@ -380,7 +411,7 @@ impl Library {
         }
         let known: Vec<(i64, String)> = {
             let db = self.db();
-            let mut st = db.prepare("SELECT id, path FROM songs WHERE folder_id = ?1")?;
+            let mut st = db.prepare("SELECT id, path FROM songs WHERE folder_id = ?1 AND path IS NOT NULL")?;
             
             st.query_map([folder.id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?
         };
@@ -390,11 +421,25 @@ impl Library {
                 report.removed += 1;
             }
         }
+        let known_stems: Vec<(i64, String)> = {
+            let db = self.db();
+            let mut st = db.prepare("SELECT id, path FROM stems WHERE folder_id = ?1")?;
+            st.query_map([folder.id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for (id, path) in known_stems {
+            if !seen.contains(&path) {
+                self.db().execute("DELETE FROM stems WHERE id = ?1", [id])?;
+            }
+        }
+        report.removed += self.drop_empty_stem_songs()?;
         Ok(report)
     }
 
     /// Adds or refreshes one audio file. Unchanged files (same modification time) are skipped.
     pub fn import_file(&self, path: &Path, folder_id: Option<i64>, root: Option<&Path>) -> Result<Imported> {
+        if let Some((base, name)) = tags::stem_of(path) {
+            return self.import_stem(path, &base, &name, folder_id, root);
+        }
         let p = path.to_string_lossy().to_string();
         let mtime = std::fs::metadata(path)?.modified().ok().and_then(|m| m.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64);
         let existing: Option<(i64, Option<i64>)> =
@@ -426,6 +471,9 @@ impl Library {
                      VALUES ('library', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
                     params![info.title, info.artist, info.album, info.year, info.genre, info.track, info.duration, p, mtime, folder_id, art, t],
                 )?;
+                let id = db.last_insert_rowid();
+                drop(db);
+                self.adopt_stems(id, path)?;
                 Ok(Imported::Added { untagged: info.genre == genre::UNSORTED })
             }
         }
@@ -433,8 +481,118 @@ impl Library {
 
     /// Drops a single file's song when the file disappears from a watched folder.
     pub fn forget_path(&self, path: &Path) -> Result<bool> {
-        let n = self.db().execute("DELETE FROM songs WHERE path = ?1", [path.to_string_lossy()])?;
-        Ok(n > 0)
+        let p = path.to_string_lossy();
+        let n = self.db().execute("DELETE FROM songs WHERE path = ?1", [&p])?;
+        let m = self.db().execute("DELETE FROM stems WHERE path = ?1", [&p])?;
+        self.drop_empty_stem_songs()?;
+        Ok(n + m > 0)
+    }
+
+    // ---------- stems ----------
+
+    /// Key for a song made only of stems: the folder the stems sit in plus the song title.
+    fn stem_group(dir: &Path, base: &str) -> String {
+        format!("{}\u{1f}{}", dir.to_string_lossy(), base.to_lowercase())
+    }
+
+    /// The whole-song file a set of stems belongs to: "Song.mp3" beside the stems or one folder up
+    /// (Suno puts stems in a "Song Stems" folder).
+    fn host_song_for(&self, dir: &Path, base: &str) -> Result<Option<i64>> {
+        let db = self.db();
+        for d in [Some(dir), dir.parent()].into_iter().flatten() {
+            for ext in tags::AUDIO_EXTENSIONS {
+                let candidate = d.join(format!("{base}.{ext}"));
+                let id: Option<i64> = db
+                    .query_row("SELECT id FROM songs WHERE path = ?1 COLLATE NOCASE", [candidate.to_string_lossy()], |r| r.get(0))
+                    .optional()?;
+                if id.is_some() {
+                    return Ok(id);
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    fn import_stem(&self, path: &Path, base: &str, name: &str, folder_id: Option<i64>, root: Option<&Path>) -> Result<Imported> {
+        let p = path.to_string_lossy().to_string();
+        let mtime = std::fs::metadata(path)?.modified().ok().and_then(|m| m.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64);
+        let existing: Option<Option<i64>> = self.db().query_row("SELECT file_mtime FROM stems WHERE path = ?1", [&p], |r| r.get(0)).optional()?;
+        if existing == Some(mtime) {
+            return Ok(Imported::Unchanged);
+        }
+        let dir = path.parent().unwrap_or(Path::new(""));
+        let group = Self::stem_group(dir, base);
+        let info = tags::read_track(path, root);
+        let mut created = false;
+        let song_id = match self.host_song_for(dir, base)? {
+            Some(id) => id,
+            None => {
+                let found: Option<i64> = self.db().query_row("SELECT id FROM songs WHERE stem_group = ?1", [&group], |r| r.get(0)).optional()?;
+                match found {
+                    Some(id) => id,
+                    None => {
+                        let genre = self.ensure_genre(&info.genre, "file")?;
+                        let album = if info.album.to_lowercase().ends_with(" stems") { String::new() } else { info.album.clone() };
+                        let t = now();
+                        let db = self.db();
+                        db.execute(
+                            "INSERT INTO songs(source, title, artist, album, year, genre, duration, folder_id, stem_group, added_at, updated_at) \
+                             VALUES ('library', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+                            params![base, info.artist, album, info.year, genre, info.duration, folder_id, group, t],
+                        )?;
+                        created = true;
+                        db.last_insert_rowid()
+                    }
+                }
+            }
+        };
+        // Stems that carry better tags (Suno's MP3s have the artist and cover art) fill in what is missing.
+        let art = match &info.picture {
+            Some((bytes, ext)) => Some(self.store_art(bytes, ext)?),
+            None => None,
+        };
+        let db = self.db();
+        db.execute(
+            "UPDATE songs SET artist = CASE WHEN artist IN ('', 'Unknown artist') AND ?2 <> 'Unknown artist' THEN ?2 ELSE artist END, \
+             art = COALESCE(art, ?3), year = CASE WHEN year = '' THEN ?4 ELSE year END, duration = COALESCE(duration, ?5) WHERE id = ?1",
+            params![song_id, info.artist, art, info.year, info.duration],
+        )?;
+        // A stem imported before stems were understood was a song of its own; it becomes a part again.
+        db.execute("DELETE FROM songs WHERE path = ?1", [&p])?;
+        db.execute(
+            "INSERT INTO stems(song_id, name, path, file_mtime, folder_id) VALUES (?1, ?2, ?3, ?4, ?5) \
+             ON CONFLICT(path) DO UPDATE SET song_id = excluded.song_id, name = excluded.name, file_mtime = excluded.file_mtime",
+            params![song_id, name, p, mtime, folder_id],
+        )?;
+        Ok(if created { Imported::Added { untagged: info.genre == genre::UNSORTED } } else if existing.is_some() { Imported::Updated } else { Imported::Unchanged })
+    }
+
+    /// When a whole-song file arrives after its stems, the stems move over to it.
+    fn adopt_stems(&self, song_id: i64, path: &Path) -> Result<()> {
+        let (Some(dir), Some(base)) = (path.parent(), path.file_stem().and_then(|s| s.to_str())) else { return Ok(()) };
+        let groups = [Self::stem_group(dir, base), Self::stem_group(&dir.join(format!("{base} Stems")), base)];
+        let db = self.db();
+        for g in groups {
+            let orphan: Option<i64> = db.query_row("SELECT id FROM songs WHERE stem_group = ?1", [&g], |r| r.get(0)).optional()?;
+            if let Some(old) = orphan {
+                db.execute("UPDATE stems SET song_id = ?1 WHERE song_id = ?2", params![song_id, old])?;
+                db.execute("UPDATE songs SET art = COALESCE(art, (SELECT art FROM songs WHERE id = ?2)) WHERE id = ?1", params![song_id, old])?;
+                db.execute("DELETE FROM songs WHERE id = ?1", [old])?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Removes stems-only songs whose stems are all gone.
+    fn drop_empty_stem_songs(&self) -> Result<usize> {
+        Ok(self.db().execute(
+            "DELETE FROM songs WHERE stem_group IS NOT NULL AND path IS NULL AND NOT EXISTS (SELECT 1 FROM stems st WHERE st.song_id = songs.id)",
+            [],
+        )?)
+    }
+
+    pub fn stem_path(&self, id: i64) -> Result<Option<PathBuf>> {
+        Ok(self.db().query_row("SELECT path FROM stems WHERE id = ?1", [id], |r| r.get::<_, String>(0)).optional()?.map(PathBuf::from))
     }
 
     /// The watched folder a path lives in, if any.
@@ -827,6 +985,62 @@ mod tests {
         std::fs::remove_file(music.join("01 First.mp3")).unwrap();
         assert_eq!(l.scan_folder(&f).unwrap().removed, 1);
         assert!(l.songs().unwrap().is_empty());
+    }
+
+    #[test]
+    fn stems_become_one_song_and_move_to_the_full_mix() {
+        let (dir, l) = lib();
+        let stems = dir.path().join("music/Every Leaf Stems");
+        std::fs::create_dir_all(&stems).unwrap();
+        for f in ["Every Leaf (Vocals).wav", "Every Leaf (Vocals).mp3", "Every Leaf (Drums).mp3", "Every Leaf (Backing Vocals).wav"] {
+            std::fs::write(stems.join(f), b"x").unwrap();
+        }
+        let f = l.add_folder(&dir.path().join("music")).unwrap();
+        let r = l.scan_folder(&f).unwrap();
+        assert_eq!(r.added, 1, "four stem files are one song");
+        let songs = l.songs().unwrap();
+        assert_eq!(songs.len(), 1);
+        assert_eq!((songs[0].title.as_str(), songs[0].stems, songs[0].has_file, songs[0].has_audio), ("Every Leaf", 4, false, true));
+        assert_eq!(songs[0].album, "", "the 'X Stems' folder is not an album");
+        assert_eq!(l.scan_folder(&f).unwrap().added, 0);
+
+        // The full song arrives one folder up: the stems move to it and the stems-only song goes away.
+        std::fs::write(dir.path().join("music/Every Leaf.mp3"), b"x").unwrap();
+        l.scan_folder(&f).unwrap();
+        let songs = l.songs().unwrap();
+        assert_eq!(songs.len(), 1);
+        assert_eq!((songs[0].stems, songs[0].has_file), (4, true));
+        let detail = l.song_detail(songs[0].id).unwrap();
+        assert_eq!(detail.stem_files.iter().filter(|s| s.name == "Vocals").count(), 2, "wav and mp3 of one part");
+
+        // Deleting the stems leaves the full song.
+        std::fs::remove_dir_all(&stems).unwrap();
+        l.scan_folder(&f).unwrap();
+        assert_eq!(l.songs().unwrap()[0].stems, 0);
+    }
+
+    #[test]
+    fn stems_imported_as_songs_before_are_regrouped() {
+        let (dir, l) = lib();
+        let music = dir.path().join("music");
+        std::fs::create_dir_all(&music).unwrap();
+        for f in ["Tune (Vocals).mp3", "Tune (Bass).mp3"] {
+            std::fs::write(music.join(f), b"x").unwrap();
+        }
+        let f = l.add_folder(&music).unwrap();
+        // What 0.1.0 did: every stem file became its own song.
+        let t = now();
+        for f in ["Tune (Vocals).mp3", "Tune (Bass).mp3"] {
+            l.db().execute(
+                "INSERT INTO songs(source, title, path, folder_id, added_at, updated_at) VALUES ('library', ?1, ?2, 1, ?3, ?3)",
+                params![f, music.canonicalize().unwrap().join(f).to_string_lossy(), t],
+            ).unwrap();
+        }
+        assert_eq!(l.songs().unwrap().len(), 2);
+        l.scan_folder(&f).unwrap();
+        let songs = l.songs().unwrap();
+        assert_eq!(songs.len(), 1);
+        assert_eq!((songs[0].title.as_str(), songs[0].stems), ("Tune", 2));
     }
 
     #[test]

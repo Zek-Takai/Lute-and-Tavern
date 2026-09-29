@@ -2,7 +2,7 @@
 import { open as pickFile } from '@tauri-apps/plugin-dialog';
 import { api, errText, lt, type SongDetail } from '../api';
 import { keyName } from '../music/notation';
-import { playSong, playTake, syncIcons } from '../player';
+import { pickStems, playing, playSong, playStems, playTake, setStemMix, stemMix, stop, syncIcons } from '../player';
 import { byId, playable, reload, rerender, state, visible, writerName } from '../state';
 import { $, copyText, date, esc, PLAY, toast } from '../util';
 import { STATUS } from './library';
@@ -11,10 +11,12 @@ import { renderSheet, resetSheet } from './sheet';
 export let cur: SongDetail | null = null;
 let tab = 'song';
 
-const tabsFor = (s: SongDetail): [string, string][] =>
-  s.source === 'ai'
-    ? [['song', 'Song'], ['chat', `Talk to ${writerName()}`], ['sheet', 'Sheet music'], ['takes', 'Takes'], ['details', 'Details'], ['versions', 'Versions']]
-    : [['details', 'Details'], ['sheet', 'Sheet music']];
+const tabsFor = (s: SongDetail): [string, string][] => {
+  const stems: [string, string][] = s.stemFiles.length ? [['stems', 'Stems']] : [];
+  return s.source === 'ai'
+    ? [['song', 'Song'], ['chat', `Talk to ${writerName()}`], ['sheet', 'Sheet music'], ['takes', 'Takes'], ...stems, ['details', 'Details'], ['versions', 'Versions']]
+    : [['details', 'Details'], ...stems, ['sheet', 'Sheet music']];
+};
 
 export async function openSong(id: number, startTab?: string) {
   try {
@@ -191,6 +193,40 @@ export function renderTab() {
       rerender();
       toast(`Removed ${s.title}`);
     };
+  }
+  if (tab === 'stems') {
+    const parts = pickStems(s.stemFiles);
+    const formats = (name: string) => [...new Set(s.stemFiles.filter((f) => f.name === name).map((f) => f.format.toUpperCase()))].join(' + ');
+    const live = playing?.kind === 'stems' && playing.id === String(s.id);
+    b.innerHTML = `<div class="row" style="margin-bottom:12px"><button class="btn primary" id="stemPlay">${live ? 'Stop' : 'Play the stems together'}</button>
+        <span class="muted small">${parts.length} parts. Mute, solo or turn down any part while it plays.${s.hasFile ? ' The play button at the top plays the full song file.' : ''}</span></div>
+      <ul class="stem-list">${parts
+        .map((f) => {
+          const m = stemMix(s.id, f.name);
+          return `<li data-stem="${esc(f.name)}">
+            <b>${esc(f.name)}</b><span class="muted small">${formats(f.name)}</span>
+            <button class="chip" data-act="mute" aria-pressed="${m.mute}">Mute</button>
+            <button class="chip" data-act="solo" aria-pressed="${m.solo}">Solo</button>
+            <input type="range" min="0" max="1.5" step="0.05" value="${m.vol}" aria-label="${esc(f.name)} volume">
+          </li>`;
+        })
+        .join('')}</ul>
+      <p class="small muted">Stems are the separate parts of a song (vocals, drums, bass...). When a folder has only stems, Lute &amp; Tavern plays them together as the song.</p>`;
+    $('#stemPlay').onclick = () => {
+      if (playing?.kind === 'stems' && playing.id === String(s.id)) stop();
+      else void playStems(byId(s.id) ?? s);
+      setTimeout(renderTab, 50);
+    };
+    b.querySelectorAll<HTMLElement>('[data-stem]').forEach((li) => {
+      const name = li.dataset.stem!;
+      li.querySelectorAll<HTMLElement>('[data-act]').forEach((btn) => (btn.onclick = () => {
+        const key = btn.dataset.act as 'mute' | 'solo';
+        const on = !stemMix(s.id, name)[key];
+        setStemMix(s.id, name, { [key]: on });
+        btn.setAttribute('aria-pressed', String(on));
+      }));
+      li.querySelector<HTMLInputElement>('input[type=range]')!.oninput = (e) => setStemMix(s.id, name, { vol: Number((e.target as HTMLInputElement).value) });
+    });
   }
   if (tab === 'versions') {
     b.innerHTML = s.versions.length

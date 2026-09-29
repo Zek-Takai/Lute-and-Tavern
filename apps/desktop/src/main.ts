@@ -160,4 +160,9 @@ async function boot() {
   void checkForUpdatesAtStart();
 }
 
-boot().catch((e) => toast(errText(e)));
+addEventListener('error', (e) => void api.logEvent('error', `${e.message} at ${e.filename}:${e.lineno}`));
+addEventListener('unhandledrejection', (e) => void api.logEvent('error', `unhandled: ${errText(e.reason)}`));
+boot().catch((e) => {
+  void api.logEvent('error', `boot failed: ${errText(e)}`);
+  toast(errText(e));
+});

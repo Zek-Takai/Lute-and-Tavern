@@ -29,12 +29,17 @@ export interface Song {
   masterTake: number | null;
   notes: Note[];
   chords: string[];
+  /** Has its own audio file or a take (not only stems). */
+  hasFile: boolean;
+  /** Number of stem files attached. */
+  stems: number;
 }
 export interface Take { id: number; name: string; origin: string; addedAt: number }
 export interface Version { id: number; label: string; note: string; createdAt: number }
 export interface Message { role: 'user' | 'writer'; text: string; createdAt: number }
+export interface Stem { id: number; name: string; format: string }
 export interface Sheet { id: number; name: string; kind: 'pdf' | 'image' | 'musicxml'; addedAt: number }
-export interface SongDetail extends Song { takes: Take[]; versions: Version[]; messages: Message[]; sheets: Sheet[]; playlists: number[] }
+export interface SongDetail extends Song { takes: Take[]; versions: Version[]; messages: Message[]; sheets: Sheet[]; playlists: number[]; stemFiles: Stem[] }
 export interface Playlist { id: number; name: string; songs: number[] }
 export interface GenreTag { id: number; name: string; origin: 'default' | 'user' | 'writer' | 'file'; songs: number }
 export interface Folder { id: number; path: string }
@@ -79,12 +84,13 @@ export const api = {
   writerModels: (baseUrl: string, apiKey: string | null) => invoke<string[]>('writer_models', { baseUrl, apiKey }),
   requestSong: (request: string, genre: string | null) => invoke<Song>('request_song', { request, genre }),
   rewriteSong: (id: number, instruction: string) => invoke<void>('rewrite_song', { id, instruction }),
+  logEvent: (level: string, message: string) => invoke<void>('log_event', { level, message }).catch(() => {}),
   updateInfo: () => invoke<UpdateInfo>('update_info'),
   checkUpdate: () => invoke<Available | null>('check_update'),
   installUpdate: () => invoke<void>('install_update'),
 };
 
 /** URL for a file served by the app's `lt://` protocol. */
-export const lt = (kind: 'audio' | 'take' | 'art' | 'sheet', arg: string | number) => convertFileSrc(`${kind}/${arg}`, 'lt');
+export const lt = (kind: 'audio' | 'take' | 'art' | 'sheet' | 'stem', arg: string | number) => convertFileSrc(`${kind}/${arg}`, 'lt');
 
 export const errText = (e: unknown) => (typeof e === 'string' ? e : e instanceof Error ? e.message : JSON.stringify(e));

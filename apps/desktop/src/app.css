@@ -24,3 +24,6 @@ input, textarea, pre, .field pre, .msg, .ask { user-select: text; -webkit-user-s
 #delSong { color: #ff9b9b; }
 .chip[disabled], .btn[disabled] { opacity: .5; cursor: default; }
 .update-bar { position: fixed; top: 16px; right: 16px; z-index: 30; display: flex; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+.stem-list { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.stem-list li { display: grid; grid-template-columns: minmax(120px, 1fr) auto auto auto minmax(100px, 180px); gap: 10px; align-items: center; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.stem-list input[type=range] { width: 100%; accent-color: var(--accent); }

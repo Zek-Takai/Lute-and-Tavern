@@ -1,6 +1,6 @@
 // Playback: real audio through the lt:// protocol, a synth preview for songs that only have a melody,
 // the now-playing queue and repeat modes. The analyser feeds both visualizers.
-import { lt, type Song } from './api';
+import { api, lt, type Song, type Stem } from './api';
 import { BEATS, IDX, SCALE, keyName } from './music/notation';
 import { byId, playable, saveSetting, setting, viewName, type Repeat } from './state';
 import { $, esc, hueOf, PLAY, STOP, toast } from './util';
@@ -10,7 +10,11 @@ let master: GainNode | null = null;
 export let analyser: AnalyserNode | null = null;
 let media: HTMLAudioElement | null = null;
 
-type Playing = { kind: 'file'; id: string } | { kind: 'synth'; id: string; nodes: OscillatorNode[]; tick: number };
+type StemTrack = { name: string; el: HTMLAudioElement; gain: GainNode; src: MediaElementAudioSourceNode };
+type Playing =
+  | { kind: 'file'; id: string }
+  | { kind: 'synth'; id: string; nodes: OscillatorNode[]; tick: number }
+  | { kind: 'stems'; id: string; tracks: StemTrack[] };
 export let playing: Playing | null = null;
 let nowSong: Song | null = null;
 let lastPlay: (() => void) | null = null;
@@ -46,6 +50,13 @@ export function stop() {
       playing.nodes.forEach((n) => { try { n.stop(); } catch { /* already stopped */ } });
       clearInterval(playing.tick);
       if (nowSong) onMelodyNote(nowSong, -1);
+    } else if (playing.kind === 'stems') {
+      for (const t of playing.tracks) {
+        t.el.pause();
+        t.src.disconnect();
+        t.gain.disconnect();
+        t.el.removeAttribute('src');
+      }
     } else media?.pause();
     playing = null;
   }
@@ -63,7 +74,8 @@ export function playSong(s: Song, list?: Song[]) {
     stop();
     return;
   }
-  if (s.hasAudio) playFile(lt('audio', s.id), s, [s.artist, s.album].filter(Boolean).join(', '), String(s.id));
+  if (s.hasFile) playFile(lt('audio', s.id), s, [s.artist, s.album].filter(Boolean).join(', '), String(s.id));
+  else if (s.stems > 0) void playStems(s);
   else if (s.notes.length) playMelody(s);
   else toast('This song has no audio or melody yet.');
 }
@@ -86,9 +98,14 @@ function playFile(url: string, s: Song, sub: string, id: string) {
       if (playing?.kind === 'file' && media!.duration) $('#pProg').style.width = (media!.currentTime / media!.duration) * 100 + '%';
     };
     media.onended = onEnded;
+    media.onerror = () => {
+      const e = media!.error;
+      void api.logEvent('error', `audio element failed: code=${e?.code} message=${e?.message ?? ''} src=${media!.currentSrc}`);
+    };
   }
   media.src = url;
-  media.play().catch(() => {
+  media.play().catch((err) => {
+    void api.logEvent('error', `play() rejected for ${url}: ${err?.name ?? ''} ${err?.message ?? err}`);
     stop();
     toast('This file could not be played. The format may not be supported.');
   });
@@ -96,6 +113,79 @@ function playFile(url: string, s: Song, sub: string, id: string) {
   showNow(s, sub);
   lastPlay = () => playFile(url, s, sub, id);
   syncIcons();
+}
+
+// ---------- stems: parts of one song played together ----------
+
+/** Per-part mixer settings, kept while the app runs. Keyed by song id, then part name. */
+const mix = new Map<number, Map<string, { vol: number; mute: boolean; solo: boolean }>>();
+export function stemMix(songId: number, name: string) {
+  let m = mix.get(songId);
+  if (!m) mix.set(songId, (m = new Map()));
+  if (!m.has(name)) m.set(name, { vol: 1, mute: false, solo: false });
+  return m.get(name)!;
+}
+function applyMix(songId: number) {
+  if (playing?.kind !== 'stems' || playing.id !== String(songId)) return;
+  const m = mix.get(songId);
+  const anySolo = !!m && [...m.values()].some((v) => v.solo);
+  for (const t of playing.tracks) {
+    const v = stemMix(songId, t.name);
+    const audible = anySolo ? v.solo : !v.mute;
+    t.gain.gain.setTargetAtTime(audible ? v.vol : 0, ac!.currentTime, 0.02);
+  }
+}
+export function setStemMix(songId: number, name: string, patch: Partial<{ vol: number; mute: boolean; solo: boolean }>) {
+  Object.assign(stemMix(songId, name), patch);
+  applyMix(songId);
+}
+
+/** One file per part: MP3 is lighter to stream than WAV when both exist. */
+export function pickStems(files: Stem[]) {
+  const byName = new Map<string, Stem>();
+  for (const f of files) {
+    const cur = byName.get(f.name);
+    if (!cur || (cur.format !== 'mp3' && f.format === 'mp3')) byName.set(f.name, f);
+  }
+  return [...byName.values()];
+}
+
+export async function playStems(s: Song) {
+  stop();
+  if (!ensureAudio()) return;
+  void ac!.resume();
+  const files = pickStems((await api.songDetail(s.id)).stemFiles);
+  if (!files.length) return toast('This song has no stems left.');
+  const tracks: StemTrack[] = files.map((f) => {
+    const el = new Audio();
+    el.crossOrigin = 'anonymous';
+    el.preload = 'auto';
+    el.src = lt('stem', f.id);
+    el.onerror = () => void api.logEvent('error', `stem ${f.name} failed: code=${el.error?.code} ${el.error?.message ?? ''} src=${el.currentSrc}`);
+    const src = ac!.createMediaElementSource(el);
+    const gain = ac!.createGain();
+    src.connect(gain).connect(master!);
+    return { name: f.name, el, gain, src };
+  });
+  const id = String(s.id);
+  playing = { kind: 'stems', id, tracks };
+  applyMix(s.id);
+  showNow(s, `${tracks.length} stems${[s.artist].filter(Boolean).map((a) => ', ' + a).join('')}`);
+  lastPlay = () => void playStems(s);
+  syncIcons();
+  // Start every part together once each can play, so they stay in step.
+  await Promise.all(tracks.map((t) => new Promise<void>((res) => {
+    if (t.el.readyState >= 3) return res();
+    t.el.addEventListener('canplay', () => res(), { once: true });
+    t.el.addEventListener('error', () => res(), { once: true });
+  })));
+  if (playing?.kind !== 'stems' || playing.id !== id) return;
+  const lead = tracks[0].el;
+  lead.ontimeupdate = () => {
+    if (playing?.kind === 'stems' && lead.duration) $('#pProg').style.width = (lead.currentTime / lead.duration) * 100 + '%';
+  };
+  lead.onended = onEnded;
+  await Promise.all(tracks.map((t) => t.el.play().catch((err) => api.logEvent('error', `stem ${t.name} play() rejected: ${err?.name ?? ''} ${err?.message ?? err}`))));
 }
 
 export function playMelody(song: Song, semis = 0) {
@@ -346,8 +436,12 @@ function drawEq() {
 /** Click on the progress bar to seek. */
 export function initSeek() {
   $('#pBar').onclick = (e) => {
-    if (playing?.kind !== 'file' || !media?.duration) return;
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    media.currentTime = ((e.clientX - r.left) / r.width) * media.duration;
+    const f = (e.clientX - r.left) / r.width;
+    if (playing?.kind === 'file' && media?.duration) media.currentTime = f * media.duration;
+    if (playing?.kind === 'stems') {
+      const d = playing.tracks[0].el.duration;
+      if (d) for (const t of playing.tracks) t.el.currentTime = f * d;
+    }
   };
 }

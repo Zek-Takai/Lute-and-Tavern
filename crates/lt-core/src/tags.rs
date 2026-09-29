@@ -15,6 +15,21 @@ pub fn is_audio(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Part names that stem exports (Suno, DAWs) put in brackets after the song title.
+const STEM_NAMES: &[&str] = &[
+    "vocals", "lead vocals", "backing vocals", "vocal", "instrumental", "drums", "bass", "guitar", "keyboard", "keys",
+    "piano", "synth", "strings", "brass", "woodwinds", "percussion", "fx", "other", "melody", "choir", "pad", "organ",
+];
+
+/// "Song (Vocals).wav" -> ("Song", "Vocals") when the bracketed part is a known stem name.
+pub fn stem_of(path: &Path) -> Option<(String, String)> {
+    let stem = path.file_stem()?.to_str()?.trim();
+    let inner = stem.strip_suffix(')')?;
+    let open = inner.rfind(" (")?;
+    let (base, name) = (inner[..open].trim(), inner[open + 2..].trim());
+    (!base.is_empty() && STEM_NAMES.contains(&name.to_lowercase().as_str())).then(|| (base.to_string(), name.to_string()))
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct TrackInfo {
     pub title: String,
@@ -111,6 +126,14 @@ fn from_path(path: &Path, root: Option<&Path>) -> TrackInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recognises_stem_files() {
+        assert_eq!(stem_of(Path::new("/m/Every Leaf (Backing Vocals).wav")), Some(("Every Leaf".into(), "Backing Vocals".into())));
+        assert_eq!(stem_of(Path::new("/m/Song (FX).mp3")), Some(("Song".into(), "FX".into())));
+        assert_eq!(stem_of(Path::new("/m/Song (Live).mp3")), None);
+        assert_eq!(stem_of(Path::new("/m/Song.mp3")), None);
+    }
 
     #[test]
     fn falls_back_to_file_and_folder_names() {

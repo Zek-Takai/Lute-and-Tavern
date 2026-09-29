@@ -103,6 +103,21 @@ const MIGRATIONS: &[&str] = &[
     INSERT OR IGNORE INTO genres(name, origin, created_at)
     SELECT DISTINCT genre, 'file', 0 FROM songs WHERE genre <> 'Unsorted';
     "#,
+    // v3: stems. Parts of one song (vocals, drums...) attach to that song instead of becoming songs.
+    // A song made only of stems has no path and is identified by its stem_group (folder + title).
+    r#"
+    ALTER TABLE songs ADD COLUMN stem_group TEXT;
+    CREATE UNIQUE INDEX songs_stem_group ON songs(stem_group) WHERE stem_group IS NOT NULL;
+    CREATE TABLE stems (
+        id         INTEGER PRIMARY KEY,
+        song_id    INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+        name       TEXT NOT NULL,
+        path       TEXT NOT NULL UNIQUE,
+        file_mtime INTEGER,
+        folder_id  INTEGER REFERENCES folders(id) ON DELETE CASCADE
+    );
+    CREATE INDEX stems_song ON stems(song_id);
+    "#,
 ];
 
 pub fn open(path: &std::path::Path) -> Result<Connection> {

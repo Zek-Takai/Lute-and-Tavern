@@ -13,10 +13,16 @@ const MAX_CHUNK: u64 = 4 * 1024 * 1024;
 pub fn handle<R: tauri::Runtime>(ctx: UriSchemeContext<'_, R>, request: Request<Vec<u8>>, responder: UriSchemeResponder) {
     let app = ctx.app_handle().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let res = match resolve(&app, request.uri().path()) {
-            Some(path) => serve(&path, request.headers().get(header::RANGE).and_then(|v| v.to_str().ok())),
+        let uri = request.uri().path().to_string();
+        let range = request.headers().get(header::RANGE).and_then(|v| v.to_str().ok()).map(String::from);
+        let res = match resolve(&app, &uri) {
+            Some(path) => serve(&path, range.as_deref()),
             None => plain(StatusCode::NOT_FOUND, "not found"),
         };
+        let status = res.status();
+        if !status.is_success() || !uri.contains("/art") {
+            crate::log::write(if status.is_success() { "debug" } else { "error" }, &format!("lt:{uri} range={} -> {status}", range.as_deref().unwrap_or("-")));
+        }
         responder.respond(res);
     });
 }
@@ -30,6 +36,7 @@ fn resolve<R: tauri::Runtime>(app: &tauri::AppHandle<R>, raw_path: &str) -> Opti
     match kind {
         "audio" => lib.audio_path(id()?).ok()?,
         "take" => lib.take_path(id()?).ok()?,
+        "stem" => lib.stem_path(id()?).ok()?,
         "sheet" => lib.sheet_path(id()?).ok()?,
         "art" => lib.art_path(arg),
         _ => None,
