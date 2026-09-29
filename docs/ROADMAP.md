@@ -13,6 +13,12 @@
 
 ## Next
 - Linux and Windows builds (on Windows, reordering the queue by dragging needs a different drag mode)
+  - Audio formats: the system web engine plays MP3, AAC/M4A and FLAC everywhere, but Windows lacks Apple Lossless
+    (ALAC) and AIFF, and Linux depends on the installed GStreamer codecs. Check what the engine can play at startup
+    (`canPlayType`) and fall back to a built-in decoder (Symphonia, pure Rust: MP3, AAC, ALAC, FLAC, Vorbis, WAV,
+    AIFF; libopus for Opus-in-M4A) served through the `lt://` protocol, so seeking and the visualizer keep working.
+  - WMA: no built-in decoder (legacy format). Say clearly that it can't play and offer to convert it to FLAC or MP3,
+    using the person's own FFmpeg when one is installed.
 - Sheet music from audio (optional tool, low priority: sheet music is for people who read it; the app's owner does not).
   Plan when it is built: use the song's Suno vocal stem when present, else split locally with Spleeter (MIT);
   vocal to notes with RMVPE (Apache-2.0), tempo with Beat This! (MIT); lyrics placed from the known words.
