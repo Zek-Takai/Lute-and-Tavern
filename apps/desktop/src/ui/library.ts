@@ -2,7 +2,7 @@
 import { api, errText, lt, type Song } from '../api';
 import { playSong, syncIcons } from '../player';
 import { keyName, staffSVG, toMeasures } from '../music/notation';
-import { genresInUse, playable, rerender, reload, state, viewName, visible, writerName, type SideTab } from '../state';
+import { genresInUse, playable, rerender, reload, saveSetting, state, viewName, visible, writerName, type SideTab } from '../state';
 import { $, esc, hueOf, PLAY, toast } from '../util';
 import { openSong } from './song';
 
@@ -33,6 +33,11 @@ export function renderSide() {
     tabs.map((k) => `<button class="rail-btn" data-st="${k}" aria-pressed="${panelOpen && state.sideTab === k}" title="${TAB_NAME[k]}" aria-label="${TAB_NAME[k]}">${ICONS[k]}</button>`).join('') +
     `<span class="rail-gap"></span><button class="rail-btn" id="openSet" title="Settings" aria-label="Settings">${ICONS.settings}</button>`;
   $('#layout').classList.toggle('panel-closed', !panelOpen);
+  const hidden = !!state.settings.sidebarHidden;
+  $('#layout').classList.toggle('sidebar-hidden', hidden);
+  const tg = $('#sideToggle');
+  tg.setAttribute('aria-pressed', String(!hidden));
+  tg.title = tg.ariaLabel = hidden ? 'Show the sidebar' : 'Hide the sidebar';
   $('#side').hidden = !panelOpen;
   if (!panelOpen) return;
   const n = (k: string) => state.songs.filter((s) => k === 'all' || s.source === k).length;
@@ -139,6 +144,10 @@ export function initLibrary(actions: { addFolder: () => void; request: () => voi
     if (panelOpen) sideQuery = '';
     renderSide();
     if (panelOpen) $('#sideFind')?.focus();
+  };
+  $('#sideToggle').onclick = async () => {
+    await saveSetting('sidebarHidden', !state.settings.sidebarHidden);
+    renderSide();
   };
   $('#side').addEventListener('input', (e) => {
     if ((e.target as HTMLElement).id !== 'sideFind') return;

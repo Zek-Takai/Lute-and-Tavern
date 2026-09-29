@@ -394,6 +394,7 @@ export function initPlayer() {
   repeat = setting<Repeat>('repeat', 'off');
   syncRepeat();
   applySkin(setting<string>('playerSkin', 'classic'));
+  applyLineColor(setting<string>('lineColor', 'theme'));
   $('#pBtn').innerHTML = PLAY;
   // The scrubber: click anywhere to jump, or drag the handle.
   const bar = $('#pBar');
@@ -447,6 +448,12 @@ export const SKINS = [
 ] as const;
 export function applySkin(skin: string) {
   $('.player').dataset.skin = SKINS.some(([k]) => k === skin) ? skin : 'classic';
+}
+
+/** Color of the progress line; the skin's own look when 'theme'. */
+export const LINE_COLORS = [['theme', 'Match the bar style'], ['rainbow', 'Rainbow'], ['white', 'White'], ['gold', 'Gold']] as const;
+export function applyLineColor(c: string) {
+  $('.player').dataset.line = LINE_COLORS.some(([k]) => k === c) ? c : 'theme';
 }
 function drawSpectrum() {
   const c = document.getElementById('pSpec') as HTMLCanvasElement | null;

@@ -2,7 +2,7 @@
 import { audioDir, join } from '@tauri-apps/api/path';
 import { open as pickFolder } from '@tauri-apps/plugin-dialog';
 import { api, errText, type UpdateInfo } from '../api';
-import { applySkin, SKINS } from '../player';
+import { applyLineColor, applySkin, LINE_COLORS, SKINS } from '../player';
 import { libraryFolder, reload, rerender, saveSetting, state } from '../state';
 import { $, esc, toast } from '../util';
 
@@ -141,6 +141,8 @@ function render() {
         <legend>Player bar</legend>
         ${SKINS.map(([k, l, d]) => `<label><input type="radio" name="playerSkin" value="${k}" ${((state.settings.playerSkin as string) || 'classic') === k ? 'checked' : ''}> <span><b>${l}</b><br><span class="muted small">${d}</span></span></label>`).join('')}
       </fieldset>
+      <label class="row small" for="lineColor">Progress line color
+        <select id="lineColor" class="btn small">${LINE_COLORS.map(([k, l]) => `<option value="${k}" ${((state.settings.lineColor as string) || 'theme') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     </section>
 
     <section class="set-sec">
@@ -257,6 +259,11 @@ function render() {
     const v = (e.target as HTMLInputElement).value;
     applySkin(v);
     void saveSetting('playerSkin', v);
+  };
+  $('#lineColor').onchange = (e) => {
+    const v = (e.target as HTMLSelectElement).value;
+    applyLineColor(v);
+    void saveSetting('lineColor', v);
   };
   $('#setSide').onchange = async (e) => {
     const v = (e.target as HTMLInputElement).value;
