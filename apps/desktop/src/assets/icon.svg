@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2A2466"/>
+      <stop offset="1" stop-color="#0E0C2A"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FFB547" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#FFB547" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="win" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFE39A"/>
+      <stop offset="1" stop-color="#FFA43A"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFE08A"/>
+      <stop offset="1" stop-color="#E9A93A"/>
+    </linearGradient>
+    <clipPath id="tile"><rect width="512" height="512" rx="112"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#tile)">
+    <rect width="512" height="512" fill="url(#sky)"/>
+    <!-- stars -->
+    <g fill="#E8E4FF">
+      <circle cx="84" cy="92" r="3"/><circle cx="148" cy="54" r="2"/><circle cx="210" cy="104" r="2.5"/>
+      <circle cx="446" cy="160" r="2.5"/><circle cx="60" cy="200" r="2"/><circle cx="452" cy="72" r="2"/>
+    </g>
+    <!-- warm light spilling on the ground -->
+    <ellipse cx="270" cy="428" rx="190" ry="44" fill="url(#glow)"/>
+    <!-- ground -->
+    <path d="M0 430 Q256 398 512 430 V512 H0Z" fill="#171437"/>
+
+    <!-- music notes rising from the chimney like smoke -->
+    <g fill="url(#gold)">
+      <g opacity=".95">
+        <ellipse cx="364" cy="142" rx="12" ry="9" transform="rotate(-20 364 142)"/>
+        <rect x="373" y="98" width="5" height="44" rx="2"/>
+        <path d="M376 98 q20 8 18 30 q-4 -14 -18 -16z"/>
+      </g>
+      <g opacity=".8">
+        <ellipse cx="398" cy="92" rx="11" ry="8" transform="rotate(-20 398 92)"/>
+        <ellipse cx="438" cy="80" rx="11" ry="8" transform="rotate(-20 438 80)"/>
+        <rect x="406" y="50" width="5" height="42" rx="2"/>
+        <rect x="446" y="38" width="5" height="42" rx="2"/>
+        <path d="M406 50 L451 38 L451 50 L406 62Z"/>
+      </g>
+      <g opacity=".55">
+        <ellipse cx="330" cy="62" rx="9" ry="7" transform="rotate(-20 330 62)"/>
+        <rect x="337" y="28" width="4" height="34" rx="2"/>
+      </g>
+    </g>
+
+    <!-- chimney -->
+    <rect x="326" y="160" width="32" height="80" fill="#5A3E35"/>
+    <rect x="320" y="152" width="44" height="14" rx="3" fill="#6E4C40"/>
+
+    <!-- walls -->
+    <rect x="186" y="252" width="182" height="176" fill="#EBD9B8"/>
+    <!-- timber frame -->
+    <g fill="#6A3F28">
+      <rect x="186" y="252" width="182" height="10"/>
+      <rect x="186" y="336" width="182" height="8"/>
+      <rect x="186" y="252" width="10" height="176"/>
+      <rect x="358" y="252" width="10" height="176"/>
+      <path d="M196 262 L236 336 H226 L196 280Z"/>
+      <path d="M358 262 L318 336 H328 L358 280Z"/>
+    </g>
+    <!-- roof -->
+    <path d="M160 266 L277 150 L394 266Z" fill="#9B3B2B"/>
+    <path d="M160 266 L277 150 L286 159 L176 270Z" fill="#B8503A"/>
+    <rect x="152" y="258" width="250" height="14" rx="6" fill="#6E2A20"/>
+    <!-- gable window -->
+    <circle cx="277" cy="222" r="17" fill="url(#win)"/>
+    <path d="M277 205 V239 M260 222 H294" stroke="#6A3F28" stroke-width="4"/>
+
+    <!-- windows -->
+    <g>
+      <rect x="208" y="278" width="44" height="46" rx="5" fill="url(#win)"/>
+      <rect x="302" y="278" width="44" height="46" rx="5" fill="url(#win)"/>
+      <path d="M230 278 V324 M208 301 H252 M324 278 V324 M302 301 H346" stroke="#6A3F28" stroke-width="4"/>
+    </g>
+    <!-- door -->
+    <path d="M252 428 V372 a25 25 0 0 1 50 0 V428Z" fill="#4E2D1D"/>
+    <path d="M258 428 V374 a19 19 0 0 1 38 0 V428Z" fill="#6A3F28"/>
+    <path d="M277 355 V428" stroke="#4E2D1D" stroke-width="3"/>
+    <circle cx="289" cy="398" r="3.5" fill="#FFD27A"/>
+    <!-- lantern by the door -->
+    <path d="M318 356 h10" stroke="#3B2418" stroke-width="3"/>
+    <rect x="320" y="360" width="12" height="17" rx="3" fill="#FFC766"/>
+
+    <!-- sign bracket and hanging lute sign -->
+    <path d="M186 292 H96" stroke="#3B2418" stroke-width="7" stroke-linecap="round"/>
+    <path d="M186 312 L150 292" stroke="#3B2418" stroke-width="5" stroke-linecap="round"/>
+    <path d="M106 295 V312 M166 295 V312" stroke="#3B2418" stroke-width="3"/>
+    <rect x="94" y="310" width="84" height="84" rx="12" fill="#7A4A2E" stroke="#4E2D1D" stroke-width="5"/>
+    <!-- lute -->
+    <g transform="rotate(-28 136 352)">
+      <path d="M136 322 C154 336 158 356 156 368 C154 382 146 390 136 390 C126 390 118 382 116 368 C114 356 118 336 136 322Z" fill="url(#gold)"/>
+      <rect x="132" y="302" width="8" height="26" rx="2" fill="url(#gold)"/>
+      <path d="M131 303 L126 292 H136 L140 303Z" fill="#E9A93A"/>
+      <circle cx="136" cy="362" r="6" fill="#4E2D1D"/>
+      <rect x="128" y="378" width="16" height="4" rx="1.5" fill="#4E2D1D"/>
+    </g>
+  </g>
+</svg>

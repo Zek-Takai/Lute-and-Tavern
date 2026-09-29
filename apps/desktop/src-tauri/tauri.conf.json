@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Lute & Tavern",
+  "version": "0.1.0",
+  "identifier": "com.luteandtavern.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Lute & Tavern",
+        "width": 1320,
+        "height": 860,
+        "minWidth": 900,
+        "minHeight": 600,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' lt: http://lt.localhost data: blob:; media-src 'self' lt: http://lt.localhost blob:; connect-src 'self' ipc: http://ipc.localhost lt: http://lt.localhost ws://localhost:5173 http://localhost:5173; style-src 'self' 'unsafe-inline'; font-src 'self' data:; frame-src 'self' lt: http://lt.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Music",
+    "shortDescription": "Your music, a songwriter and sheet music in one app",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+  }
+}

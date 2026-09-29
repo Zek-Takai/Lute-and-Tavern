@@ -1,0 +1,129 @@
+//! SQLite schema and migrations. The database lives in the app's data folder as `library.db`.
+
+use anyhow::Result;
+use rusqlite::Connection;
+
+const MIGRATIONS: &[&str] = &[
+    // v1: library, songwriter songs, playlists, sheets, settings
+    r#"
+    CREATE TABLE songs (
+        id          INTEGER PRIMARY KEY,
+        source      TEXT NOT NULL CHECK (source IN ('library','ai')),
+        title       TEXT NOT NULL,
+        artist      TEXT NOT NULL DEFAULT '',
+        album       TEXT NOT NULL DEFAULT '',
+        year        TEXT NOT NULL DEFAULT '',
+        genre       TEXT NOT NULL DEFAULT 'Unsorted',
+        track       INTEGER,
+        duration    REAL,
+        path        TEXT UNIQUE,
+        file_mtime  INTEGER,
+        folder_id   INTEGER REFERENCES folders(id) ON DELETE CASCADE,
+        art         TEXT,
+        added_at    INTEGER NOT NULL,
+        updated_at  INTEGER NOT NULL,
+        -- songwriter fields (source = 'ai')
+        request     TEXT,
+        status      TEXT,
+        sub_genre   TEXT NOT NULL DEFAULT '',
+        song_key    TEXT NOT NULL DEFAULT '',
+        bpm         INTEGER NOT NULL DEFAULT 0,
+        style       TEXT NOT NULL DEFAULT '',
+        exclude     TEXT NOT NULL DEFAULT '',
+        lyrics      TEXT NOT NULL DEFAULT '',
+        master_take INTEGER,
+        -- sheet music written or imported in the app
+        notes_json  TEXT NOT NULL DEFAULT '[]',
+        chords_json TEXT NOT NULL DEFAULT '[]'
+    );
+    CREATE INDEX songs_genre ON songs(genre COLLATE NOCASE);
+    CREATE TABLE folders (
+        id   INTEGER PRIMARY KEY,
+        path TEXT NOT NULL UNIQUE
+    );
+    CREATE TABLE takes (
+        id       INTEGER PRIMARY KEY,
+        song_id  INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+        name     TEXT NOT NULL,
+        path     TEXT NOT NULL,
+        origin   TEXT NOT NULL,
+        added_at INTEGER NOT NULL
+    );
+    CREATE TABLE versions (
+        id         INTEGER PRIMARY KEY,
+        song_id    INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+        label      TEXT NOT NULL,
+        note       TEXT NOT NULL,
+        title      TEXT NOT NULL,
+        lyrics     TEXT NOT NULL,
+        style      TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    );
+    CREATE TABLE messages (
+        id         INTEGER PRIMARY KEY,
+        song_id    INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+        role       TEXT NOT NULL CHECK (role IN ('user','writer')),
+        text       TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    );
+    CREATE TABLE sheets (
+        id       INTEGER PRIMARY KEY,
+        song_id  INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+        name     TEXT NOT NULL,
+        kind     TEXT NOT NULL CHECK (kind IN ('pdf','image','musicxml')),
+        path     TEXT NOT NULL,
+        added_at INTEGER NOT NULL
+    );
+    CREATE TABLE playlists (
+        id         INTEGER PRIMARY KEY,
+        name       TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    );
+    CREATE TABLE playlist_songs (
+        playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+        song_id     INTEGER NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+        pos         INTEGER NOT NULL,
+        PRIMARY KEY (playlist_id, song_id)
+    );
+    CREATE TABLE settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+    "#,
+    // v2: genre tags people and the songwriter can create; defaults are seeded for quick picking
+    r#"
+    CREATE TABLE genres (
+        id         INTEGER PRIMARY KEY,
+        name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        origin     TEXT NOT NULL CHECK (origin IN ('default','user','writer','file')),
+        created_at INTEGER NOT NULL
+    );
+    INSERT INTO genres(name, origin, created_at)
+    SELECT value, 'default', 0 FROM json_each('["Pop","Rock","Hip-Hop","R&B","Soul","Country","Folk","Indie","Alternative","Electronic","Dance","Jazz","Blues","Classical","Metal","Punk","Reggae","Latin","World","Ambient","Lo-Fi","Soundtrack","Acoustic","Singer-Songwriter","Kids"]');
+    INSERT OR IGNORE INTO genres(name, origin, created_at)
+    SELECT DISTINCT genre, 'file', 0 FROM songs WHERE genre <> 'Unsorted';
+    "#,
+];
+
+pub fn open(path: &std::path::Path) -> Result<Connection> {
+    let conn = Connection::open(path)?;
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    migrate(&conn)?;
+    Ok(conn)
+}
+
+pub fn open_in_memory() -> Result<Connection> {
+    let conn = Connection::open_in_memory()?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    migrate(&conn)?;
+    Ok(conn)
+}
+
+fn migrate(conn: &Connection) -> Result<()> {
+    let current: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    for (i, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
+        conn.execute_batch(&format!("BEGIN; {sql} PRAGMA user_version = {}; COMMIT;", i + 1))?;
+    }
+    Ok(())
+}

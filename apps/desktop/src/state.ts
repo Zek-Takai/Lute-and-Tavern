@@ -1,0 +1,101 @@
+// App state: the library snapshot from Rust plus what the person is looking at.
+import { api, type Snapshot, type Song, type WriterSettings } from './api';
+
+export type View = { kind: 'all' | 'ai' | 'library' } | { kind: 'pl'; id: number };
+export type SideTab = 'library' | 'playlists' | 'genres';
+export type Repeat = 'off' | 'all' | 'one';
+
+export const state = {
+  songs: [] as Song[],
+  playlists: [] as Snapshot['playlists'],
+  genres: [] as Snapshot['genres'],
+  folders: [] as Snapshot['folders'],
+  settings: {} as Record<string, unknown>,
+  writer: { baseUrl: '', model: '', name: 'Bard', hasKey: false } as WriterSettings,
+  view: { kind: 'all' } as View,
+  genre: 'all',
+  filter: 'all',
+  sideTab: 'library' as SideTab,
+  query: '',
+  sort: 'recent',
+};
+
+let renderAll: () => void = () => {};
+export const onRender = (fn: () => void) => (renderAll = fn);
+export const rerender = () => renderAll();
+
+export async function reload() {
+  const snap = await api.library();
+  state.songs = snap.songs;
+  state.playlists = snap.playlists;
+  state.genres = snap.genres;
+  state.folders = snap.folders;
+  state.settings = snap.settings;
+}
+
+export const setting = <T>(key: string, fallback: T): T => (state.settings[key] as T) ?? fallback;
+export async function saveSetting(key: string, value: unknown) {
+  state.settings[key] = value;
+  await api.setSetting(key, value);
+}
+
+export const writerName = () => state.writer.name || 'Bard';
+export const byId = (id: number) => state.songs.find((s) => s.id === id);
+export const gkey = (g: string) => (g || 'Unsorted').toLowerCase();
+
+/** Genres that have songs, most used first; Unsorted last. */
+export function genresInUse() {
+  const map = new Map<string, { name: string; n: number }>();
+  for (const s of state.songs) {
+    const k = gkey(s.genre);
+    if (!map.has(k)) map.set(k, { name: s.genre || 'Unsorted', n: 0 });
+    map.get(k)!.n++;
+  }
+  return [...map.entries()].sort(
+    (a, b) => Number(a[0] === 'unsorted') - Number(b[0] === 'unsorted') || b[1].n - a[1].n || a[1].name.localeCompare(b[1].name),
+  );
+}
+
+export const playable = (s: Song) => s.hasAudio || s.notes.length > 0;
+
+function inView(s: Song) {
+  const v = state.view;
+  if (v.kind === 'ai') return s.source === 'ai';
+  if (v.kind === 'library') return s.source === 'library';
+  if (v.kind === 'pl') return !!state.playlists.find((p) => p.id === v.id)?.songs.includes(s.id);
+  return true;
+}
+
+export function visible(): Song[] {
+  const q = state.query.trim().toLowerCase();
+  const list = state.songs.filter(
+    (s) =>
+      inView(s) &&
+      (state.genre === 'all' || gkey(s.genre) === state.genre) &&
+      (state.view.kind !== 'ai' || state.filter === 'all' || s.status === state.filter) &&
+      (!q || [s.title, s.artist, s.album, s.genre, s.subGenre, s.lyrics, s.request ?? ''].join(' ').toLowerCase().includes(q)),
+  );
+  const v = state.view;
+  switch (state.sort) {
+    case 'title':
+      return list.sort((a, b) => a.title.localeCompare(b.title));
+    case 'artist':
+      return list.sort((a, b) => a.artist.localeCompare(b.artist) || (a.album || '').localeCompare(b.album || '') || (a.track ?? 0) - (b.track ?? 0));
+    case 'genre':
+      return list.sort((a, b) => a.genre.localeCompare(b.genre) || a.title.localeCompare(b.title));
+    default:
+      if (v.kind === 'pl') {
+        const order = state.playlists.find((p) => p.id === v.id)?.songs ?? [];
+        return list.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+      }
+      return list.sort((a, b) => b.addedAt - a.addedAt || b.id - a.id);
+  }
+}
+
+export function viewName() {
+  const v = state.view;
+  if (v.kind === 'pl') return state.playlists.find((p) => p.id === v.id)?.name ?? 'Playlist';
+  const base = { all: 'All music', ai: `Written with ${writerName()}`, library: 'My music' }[v.kind];
+  const g = state.genre === 'all' ? '' : genresInUse().find(([k]) => k === state.genre)?.[1].name;
+  return g ? `${base}, ${g}` : base;
+}

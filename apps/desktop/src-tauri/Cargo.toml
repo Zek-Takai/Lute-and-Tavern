@@ -1,0 +1,25 @@
+[package]
+name = "lute-and-tavern"
+version = "0.1.0"
+edition = "2024"
+description = "Lute & Tavern: your music library, an AI songwriter and sheet music in one app"
+
+[lib]
+name = "lute_and_tavern_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+anyhow = "1.0.104"
+keyring = "4.2.0"
+lt-core = { path = "../../../crates/lt-core" }
+mime_guess = "2.0.5"
+notify = "8.2.0"
+notify-debouncer-mini = "0.7.0"
+percent-encoding = "2.3.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tauri = "2.12.0"
+tauri-plugin-dialog = "2.8.0"
+
+[build-dependencies]
+tauri-build = "2.7.0"

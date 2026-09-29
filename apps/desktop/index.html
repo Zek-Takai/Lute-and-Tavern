@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lute &amp; Tavern</title>
+</head>
+<body>
+<canvas id="viz" aria-hidden="true"></canvas><div class="veil"></div>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <img class="logo" src="/src/assets/icon.svg" alt="">
+      <h1>Lute &amp; Tavern</h1>
+    </div>
+    <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="search" placeholder="Search songs, artists, albums, lyrics" aria-label="Search music"></label>
+    <button class="btn" id="addMusic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 4v12M6 10l6 6 6-6M5 20h14"/></svg>Add music</button>
+    <button class="btn iconbtn" id="openSet" aria-label="Settings" title="Settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+    <button class="btn primary" id="newSong"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>Request a song</button>
+  </header>
+  <div class="layout">
+    <aside class="side glass" id="side" aria-label="Library"></aside>
+    <div>
+      <div class="view-head" id="viewHead"></div>
+      <div class="bar">
+        <div class="chips" id="chips"></div>
+        <select id="sort" aria-label="Sort songs">
+          <option value="recent">Recently added</option>
+          <option value="title">Title A to Z</option>
+          <option value="artist">Artist</option>
+          <option value="genre">Genre</option>
+        </select>
+      </div>
+      <main class="grid" id="grid"></main>
+    </div>
+  </div>
+</div>
+<datalist id="genreList"></datalist>
+
+<dialog id="dlg" aria-labelledby="mTitle">
+  <div class="m-head">
+    <div class="grow">
+      <h2 id="mTitle"></h2>
+      <div class="m-meta" id="mMeta"></div>
+    </div>
+    <button class="play" id="mPlay" aria-label="Play"></button>
+    <button class="close" id="mClose" aria-label="Close"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </div>
+  <nav class="tabs" role="tablist" id="tabs"></nav>
+  <div class="m-body" id="mBody"></div>
+</dialog>
+
+<dialog id="req" aria-labelledby="reqTitle">
+  <form class="reqform" id="reqForm">
+    <h2 id="reqTitle">Request a song</h2>
+    <p class="muted small" style="margin:0">Describe it the way you'd tell a friend: mood, genre, what it's about, who it's for. <span id="writerName"></span> writes the lyrics and the Suno style prompt.</p>
+    <textarea id="reqText" required placeholder="A slow country song about my grandpa's truck. Warm, a little funny, male vocal."></textarea>
+    <label class="row small muted" for="reqGenre" style="flex-wrap:nowrap">Genre <input id="reqGenre" class="inline-input" list="genreList" placeholder="Leave empty and the songwriter picks one"></label>
+    <div class="quick" id="reqQuick"></div>
+    <div class="row" style="justify-content:flex-end"><button type="button" class="btn" id="reqCancel">Cancel</button><button class="btn primary">Send request</button></div>
+  </form>
+</dialog>
+
+<dialog id="imp" aria-labelledby="impTitle">
+  <div class="reqform">
+    <h2 id="impTitle">Add music</h2>
+    <p class="muted small" style="margin:0">Add a music folder and Lute &amp; Tavern keeps it in sync: songs you add, change or delete there show up here on their own. Each file's tags fill in the title, artist, album, year, genre and cover art.</p>
+    <div class="row"><button class="btn primary" id="impFolder">Add a music folder</button><button class="btn" id="impFiles">Add single files</button></div>
+    <p class="muted small" style="margin:0">You can also drag files or folders onto the window.</p>
+    <div class="row" style="justify-content:flex-end"><button type="button" class="btn" id="impClose">Done</button></div>
+  </div>
+</dialog>
+
+<dialog id="set" aria-labelledby="setTitle">
+  <div class="reqform settings" id="setBody"></div>
+</dialog>
+
+<div class="dropover" id="dropOver" hidden>Drop to add to your library</div>
+<div class="player" aria-live="polite">
+  <div class="in">
+    <div class="ctl">
+      <button class="play" id="pPrev" aria-label="Previous"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+      <button class="play" id="pBtn" aria-label="Play"></button>
+      <button class="play" id="pNext" aria-label="Next"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
+    </div>
+    <div class="np-art" id="pArt" hidden></div>
+    <div class="t"><b id="pTitle">Nothing playing</b><span class="muted small" id="pSub">Pick a song, or add your music</span></div>
+    <div class="progress" id="pBar"><i id="pProg"></i></div>
+    <div class="ctl">
+      <button class="play tog" id="rAll" aria-pressed="false" aria-label="Repeat playlist" title="Repeat playlist"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l3 3-3 3"/><path d="M4 11V9a4 4 0 0 1 4-4h12"/><path d="M7 22l-3-3 3-3"/><path d="M20 13v2a4 4 0 0 1-4 4H4"/></svg></button>
+      <button class="play tog" id="rOne" aria-pressed="false" aria-label="Repeat song" title="Repeat song"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l3 3-3 3"/><path d="M4 11V9a4 4 0 0 1 4-4h12"/><path d="M7 22l-3-3 3-3"/><path d="M20 13v2a4 4 0 0 1-4 4H4"/><path d="M11 10.5l1.5-1V15" stroke-width="2"/></svg></button>
+      <button class="play tog" id="qBtn" aria-expanded="false" aria-controls="queue" aria-label="Show what's playing next" title="Now playing list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 6h11M4 12h11M4 18h7"/><path d="M17 15v6l4-3z" fill="currentColor" stroke="none"/></svg></button>
+    </div>
+  </div>
+</div>
+<aside class="queue glass" id="queue" hidden aria-label="Now playing list">
+  <header><div class="grow"><b>Now playing</b><span class="meta" id="qFrom"></span></div>
+    <button class="close" id="qClose" aria-label="Close list"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6 6 18"/></svg></button></header>
+  <ol id="qList"></ol>
+</aside>
+<div class="toast" id="toast" role="status"></div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
