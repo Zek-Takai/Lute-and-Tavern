@@ -26,6 +26,7 @@ lute-and-tavern/
 │       │   └── ui/            library grid and sidebar, song popup, sheet editor, settings
 │       └── src-tauri/         Rust side of the app: commands, lt:// file protocol, folder watcher
 ├── scripts/
+│   ├── dev-mac.sh             runs one live development copy on the Mac
 │   └── build-mac.sh           builds and signs the macOS app (run on the Mac)
 └── design/
     └── icon/                  app icon source (SVG) and master PNG
