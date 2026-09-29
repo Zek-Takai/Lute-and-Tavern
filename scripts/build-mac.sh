@@ -44,6 +44,8 @@ version=$(node -p "require('./src-tauri/tauri.conf.json').version")
 print "Lute & Tavern $version, ${mode} build, signing with: $identity"
 
 [[ -d node_modules ]] || npm install --no-fund --no-audit
+print "(Tauri may warn that it is skipping notarization. That is expected: this script notarizes release builds"
+print " itself, with the notary login saved in your keychain, so no password ever sits in an environment variable.)"
 
 if [[ "$mode" == local ]]; then
   APPLE_SIGNING_IDENTITY="$hash" npm run tauri build -- --bundles app
