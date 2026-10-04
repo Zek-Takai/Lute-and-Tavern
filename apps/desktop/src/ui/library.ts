@@ -5,7 +5,7 @@ import { appleStatus, findOnApple, isConnected as appleConnected, musicKit } fro
 import { playShuffled, playSong, syncIcons } from '../player';
 import { keyName, staffSVG, toMeasures } from '../music/notation';
 import { albums, genresInUse, inMainLibrary, isExternalView, playable, rerender, reload, saveSetting, stage, state, viewName, visible, writerName, type SideTab } from '../state';
-import { $, cssUrl, esc, hueOf, PLAY, toast } from '../util';
+import { $, cssUrl, esc, PLAY, toast, noArt } from '../util';
 import { artUrl } from '../apple';
 import { appleHead, applePanel, handleApplePanelClick, openApplePage, renderAppleGrid } from './apple';
 import { openSong } from './song';
@@ -177,8 +177,7 @@ function cover(s: Song) {
   if (s.source === 'ai' && s.status === 'writing' && !s.lyrics) return `<div class="staff"><div class="placeholder">${esc(writerName())} is writing…</div></div>`;
   if (s.notes.length)
     return `<div class="staff">${staffSVG(toMeasures(s.notes).slice(0, 2), { g: 6.5, W: 300, lyrics: false, timesig: false, chords: s.chords, title: s.title })}</div>`;
-  const h = hueOf(s.title + s.artist);
-  return `<div class="cover" style="background-image:linear-gradient(135deg,hsl(${h} 55% 38%),hsl(${(h + 50) % 360} 60% 18%))">${esc((s.title[0] || '♪').toUpperCase())}</div>`;
+  return noArt('cover');
 }
 
 export function renderGrid() {

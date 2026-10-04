@@ -1,3 +1,4 @@
+import logoUrl from './assets/icon.svg';
 export const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
 export const esc = (s: unknown) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -18,6 +19,11 @@ export function toast(msg: string) {
   clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => t.classList.remove('show'), 3200);
 }
+
+/** The app's logo, for songs and stations that have no artwork of their own. */
+export const LOGO = logoUrl;
+/** The no-artwork picture: the logo on a dark panel (`cls` is the element's usual class). */
+export const noArt = (cls: string, tag: 'div' | 'span' = 'div') => `<${tag} class="${cls} noart" style="background-image:${esc(cssUrl(LOGO))}"></${tag}>`;
 
 export function hueOf(str: string) {
   let h = 0;

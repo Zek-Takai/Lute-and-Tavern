@@ -236,3 +236,7 @@ body{padding-block:0}
   .wrap>.layout.panel-closed{grid-template-rows:auto minmax(0,1fr)}
   .layout>.side{max-height:35vh}
 }
+
+/* no artwork: the app's logo, centered on a dark panel */
+.noart{background-color:#151838 !important;background-size:52% !important;background-position:center !important;background-repeat:no-repeat !important}
+.th.noart,.np-art.noart{background-size:68% !important}

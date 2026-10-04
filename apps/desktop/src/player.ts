@@ -5,7 +5,7 @@ import { applePause, applePosition, appleResume, appleSeek, appleStop, artUrl, p
 import { BEATS, IDX, SCALE, keyName } from './music/notation';
 import { preloadShow } from './shows';
 import { byId, playable, saveSetting, setting, viewName, type Repeat } from './state';
-import { $, cssUrl, esc, hueOf, PAUSE, PLAY, toast } from './util';
+import { $, cssUrl, esc, PAUSE, PLAY, toast, LOGO, noArt } from './util';
 
 let ac: AudioContext | null = null;
 let master: GainNode | null = null;
@@ -820,8 +820,9 @@ function showNow(s: Song, sub: string) {
   $('#pSub').textContent = sub;
   const a = $('#pArt');
   const img = s.art ? lt('art', s.art) : artUrl(s.artUrl, 120);
-  a.hidden = !img;
-  if (img) a.style.backgroundImage = cssUrl(img);
+  a.hidden = false;
+  a.classList.toggle('noart', !img);
+  a.style.backgroundImage = cssUrl(img || LOGO);
 }
 
 /** After the library reloads, keep queue entries pointing at fresh song objects. */
@@ -849,8 +850,7 @@ export function syncIcons() {
 export function thumb(s: Song) {
   if (s.art) return `<span class="th" style="background-image:${esc(cssUrl(lt('art', s.art)))}"></span>`;
   if (s.artUrl) return `<span class="th" style="background-image:${esc(cssUrl(artUrl(s.artUrl, 80)!))}"></span>`;
-  const h = hueOf(s.title + s.artist);
-  return `<span class="th" style="background-image:linear-gradient(135deg,hsl(${h} 55% 38%),hsl(${(h + 50) % 360} 60% 18%))">${esc((s.title[0] || '♪').toUpperCase())}</span>`;
+  return noArt('th', 'span');
 }
 
 export function renderQueue() {

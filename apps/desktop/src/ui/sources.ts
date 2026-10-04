@@ -5,7 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { api, errText, type Connection, type RemoteItem, type RemoteResults, type Song, type Station } from '../api';
 import { aiHooks, playSong, setNowSub, streamSources } from '../player';
 import { rerender, state } from '../state';
-import { $, cssUrl, esc, hueOf, PLAY, toast } from '../util';
+import { $, cssUrl, esc, PLAY, toast, noArt } from '../util';
 import { openSettings } from './settings';
 
 // ---------- shared ----------
@@ -47,8 +47,7 @@ function external(p: Partial<Song> & Pick<Song, 'id' | 'title' | 'provider' | 'p
 
 const cover = (art: string | null, title: string) => {
   if (art) return `<div class="cover" style="background-image:${esc(cssUrl(art))}"></div>`;
-  const h = hueOf(title);
-  return `<div class="cover" style="background-image:linear-gradient(135deg,hsl(${h} 55% 38%),hsl(${(h + 50) % 360} 60% 18%))">${esc((title[0] || '♪').toUpperCase())}</div>`;
+  return noArt('cover');
 };
 
 // ---------- radio ----------
