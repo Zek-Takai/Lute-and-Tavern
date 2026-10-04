@@ -1,7 +1,7 @@
 // Settings: the songwriter connection, music folders, genre tags and the sidebar's starting tab.
 import { audioDir, join } from '@tauri-apps/api/path';
 import { message, open as pickFolder } from '@tauri-apps/plugin-dialog';
-import { api, errText, type McpInfo, type PlexServer, type SpeechSettings, type SyncSettings, type UpdateInfo } from '../api';
+import { api, errText, type McpInfo, type PlexServer, type SpeechSettings, type SyncSettings, type UpdateInfo, type BackupSettings, type BackupSchedule } from '../api';
 import { comboOf, DEFAULT_KEYS, keyLabel } from './assistant';
 import { connections, loadConnections, syncStatus } from './sources';
 import { applyLineColor, applySkin, LINE_COLORS, SKINS } from '../player';
@@ -44,6 +44,7 @@ const KIND_HELP: Record<string, string> = {
   webdav: 'Plays music straight from a shared folder, browsed as folders, with no playlists or music search. Use it for plain NAS shares or rclone. For Nextcloud, choose the Music server kind instead.',
 };
 let addKind = 'plex';
+let backupCfg: BackupSettings = { conn: null, folder: 'Music/Lute & Tavern', schedule: { mode: 'weekly', day: 0, time: '16:00' }, last: null, lastReport: null, next: null, running: false };
 let syncCfg: SyncSettings = { kind: 'none', address: 'http://127.0.0.1:8384', command: '', hasKey: false };
 let mcp: McpInfo = { enabled: false, running: false, url: '', error: null };
 let apple: AppleStatus = { ready: false, builtIn: false, keyId: '', teamId: '' };
@@ -100,6 +101,7 @@ export async function openSettings(section?: 'writer' | 'servers') {
   mcp = await api.mcpInfo().catch(() => mcp);
   speech = await api.speechSettings().catch(() => speech);
   syncCfg = await api.syncSettings().catch(() => syncCfg);
+  backupCfg = await api.backupSettings().catch(() => backupCfg);
   apple = await appleStatus().catch(() => apple);
   if (apple.ready) await musicKit().catch(() => {});
   render();
@@ -246,6 +248,20 @@ function render() {
       <div id="syReport"></div>
     </section>
 
+    <section class="set-sec" id="setBackup">
+      <h3>Backup</h3>
+      <p class="muted small">Copies your library folder to a server in the same layout, so new songs land in their place there. Only new, changed and moved files are sent; nothing on the server is ever deleted. It goes to a <b>WebDAV</b> connection (add one under Your music servers). For Nextcloud that's its Files address, <code>https://your-nextcloud/remote.php/dav/files/your-name</code>, which works alongside its Music server connection.</p>
+      <div class="form">
+        <label for="bConn">Back up to</label><select id="bConn"><option value="">Not set up</option>${connections.filter((c) => c.kind === 'webdav').map((c) => `<option value="${c.id}" ${backupCfg.conn === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
+        <label for="bFolder">Folder there</label><input id="bFolder" value="${esc(backupCfg.folder)}" placeholder="Music/Lute & Tavern">
+        <label for="bMode">When</label><span class="row"><select id="bMode">${(['manual', 'daily', 'weekly'] as const).map((m) => `<option value="${m}" ${backupCfg.schedule.mode === m ? 'selected' : ''}>${{ manual: 'Only when I press Back up now', daily: 'Every day', weekly: 'Every week' }[m]}</option>`).join('')}</select>
+          ${backupCfg.schedule.mode === 'weekly' ? `<select id="bDay">${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d, i) => `<option value="${i}" ${backupCfg.schedule.day === i ? 'selected' : ''}>${d}</option>`).join('')}</select>` : ''}
+          ${backupCfg.schedule.mode !== 'manual' ? `<input id="bTime" type="time" value="${esc(backupCfg.schedule.time)}" style="width:auto">` : ''}</span>
+      </div>
+      <div class="row"><button class="btn primary" id="bSave">Save</button>${backupCfg.conn ? `<button class="btn" id="bNow" ${backupCfg.running ? 'disabled' : ''}>Back up now</button>` : ''}<span class="muted small" id="bStatus">${esc(backupCfg.running ? 'Backing up…' : backupCfg.lastReport?.message ?? '')}</span></div>
+      <p class="muted small">${backupCfg.last ? `Last backup ${new Date(backupCfg.last * 1000).toLocaleString()}. ` : ''}${backupCfg.next && backupCfg.schedule.mode !== 'manual' && backupCfg.conn ? `Next ${new Date(backupCfg.next * 1000).toLocaleString()} (if the app is closed then, it runs when it next opens).` : ''}</p>
+    </section>
+
     <section class="set-sec" id="setServers">
       <h3>Your music servers</h3>
       <p class="muted small">Play music you keep elsewhere: a server on a device you own (a NAS or home computer) or a cloud server you run. It's just an address, so it works at home, over the internet or through a VPN. Sign-ins are kept in the system keychain.</p>
@@ -266,7 +282,7 @@ function render() {
         <label for="cUser">Username</label><input id="cUser" autocomplete="off">
         <label for="cPass">Password</label><input id="cPass" type="password" autocomplete="off">
       </div>
-      <label class="row small"><input type="checkbox" id="cInLib" checked> Add its songs to My music (streamed from the server; songs you have as local files stay local)</label>
+      <label class="row small"><input type="checkbox" id="cInLib" ${addKind === 'webdav' ? '' : 'checked'}> Add its songs to My music (streamed from the server; songs you have as local files stay local)</label>
       <div class="row"><button class="btn primary" id="cAdd">Connect</button><span class="muted small" id="cStatus"></span></div>`}
     </section>
 
@@ -533,6 +549,39 @@ function render() {
   });
   document.getElementById('syCheck')?.addEventListener('click', () => void showSyncReport());
   if (syncCfg.kind !== 'none') void showSyncReport();
+  const readBackup = () => {
+    const mode = $<HTMLSelectElement>('#bMode').value as BackupSchedule['mode'];
+    return {
+      conn: $<HTMLSelectElement>('#bConn').value ? Number($<HTMLSelectElement>('#bConn').value) : null,
+      folder: $<HTMLInputElement>('#bFolder').value,
+      schedule: { mode, day: Number((document.getElementById('bDay') as HTMLSelectElement | null)?.value ?? backupCfg.schedule.day), time: (document.getElementById('bTime') as HTMLInputElement | null)?.value || backupCfg.schedule.time },
+    };
+  };
+  $<HTMLSelectElement>('#bMode').onchange = () => {
+    const b = readBackup();
+    backupCfg = { ...backupCfg, ...b };
+    render();
+    $('#setBackup')?.scrollIntoView({ block: 'nearest' });
+  };
+  $('#bSave').onclick = async () => {
+    const b = readBackup();
+    try {
+      backupCfg = await api.setBackupSettings(b.conn, b.folder, b.schedule);
+      render();
+      toast('Backup saved');
+    } catch (e) {
+      $('#bStatus').textContent = errText(e);
+    }
+  };
+  document.getElementById('bNow')?.addEventListener('click', async () => {
+    try {
+      await api.backupNow();
+      $('#bStatus').textContent = 'Backing up…';
+      (document.getElementById('bNow') as HTMLButtonElement).disabled = true;
+    } catch (e) {
+      $('#bStatus').textContent = errText(e);
+    }
+  });
   $<HTMLSelectElement>('#cKind').onchange = (e) => {
     addKind = (e.target as HTMLSelectElement).value;
     render();

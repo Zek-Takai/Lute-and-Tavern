@@ -24,6 +24,7 @@ struct Entry {
     /// Path as the server gives it (percent-encoded)
     href: String,
     dir: bool,
+    size: Option<u64>,
 }
 
 pub struct WebDav<'a> {
@@ -52,7 +53,7 @@ impl<'a> WebDav<'a> {
 
     fn list(&self, href: &str, depth: &str) -> Result<Vec<Entry>> {
         let url = self.url_of(href)?;
-        let body = r#"<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>"#;
+        let body = r#"<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/></d:prop></d:propfind>"#;
         let res = http()?
             .request(reqwest::Method::from_bytes(b"PROPFIND")?, url.clone())
             .header("Depth", depth)
@@ -122,6 +123,83 @@ impl<'a> WebDav<'a> {
 }
 
 /// Last path segment, decoded ("Lute%20%26%20Tavern/" → "Lute & Tavern").
+/// Writing, for backups: addresses are built from path pieces under the connection's address, so names with
+/// spaces, "&" or "#" are encoded correctly.
+impl WebDav<'_> {
+    /// The address of `pieces` (folder names and a file name) under the connection's address.
+    pub fn url_for(&self, pieces: &[&str], dir: bool) -> reqwest::Url {
+        let mut u = self.root.clone();
+        {
+            let mut seg = u.path_segments_mut().expect("http address");
+            seg.pop_if_empty();
+            for p in pieces.iter().filter(|p| !p.is_empty()) {
+                seg.push(p);
+            }
+            if dir {
+                seg.push("");
+            }
+        }
+        u
+    }
+
+    fn send(&self, method: &str, url: &reqwest::Url) -> Result<reqwest::blocking::RequestBuilder> {
+        Ok(http()?.request(reqwest::Method::from_bytes(method.as_bytes())?, url.clone()).header("Authorization", &self.auth))
+    }
+
+    /// Size of a file on the server, `Some(None)` for a folder, `None` when nothing is there.
+    pub fn stat(&self, url: &reqwest::Url) -> Result<Option<Option<u64>>> {
+        let body = r#"<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/></d:prop></d:propfind>"#;
+        let res = self.send("PROPFIND", url)?.header("Depth", "0").header("Content-Type", "application/xml").body(body).send()?;
+        match res.status().as_u16() {
+            404 => Ok(None),
+            207 => Ok(parse_multistatus(&res.text()?).into_iter().next().map(|e| if e.dir { None } else { e.size })),
+            401 | 403 => bail!("{} refused the sign-in", self.conn.name),
+            s => bail!("{} answered {s} while checking {}", self.conn.name, url.path()),
+        }
+    }
+
+    /// Creates a folder and any missing folders above it.
+    pub fn make_folders(&self, pieces: &[&str]) -> Result<()> {
+        for i in 1..=pieces.len() {
+            let u = self.url_for(&pieces[..i], true);
+            if self.stat(&u)?.is_some() {
+                continue;
+            }
+            let res = self.send("MKCOL", &u)?.send()?;
+            if !(res.status().is_success() || res.status().as_u16() == 405) {
+                bail!("{} could not create the folder {} ({})", self.conn.name, u.path(), res.status());
+            }
+        }
+        Ok(())
+    }
+
+    /// Uploads a local file (streamed, no size limit) to `url`.
+    pub fn upload(&self, url: &reqwest::Url, file: &std::path::Path) -> Result<()> {
+        let f = std::fs::File::open(file)?;
+        let len = f.metadata()?.len();
+        let client = reqwest::blocking::Client::builder().connect_timeout(std::time::Duration::from_secs(15)).timeout(None).build()?;
+        let res = client
+            .put(url.clone())
+            .header("Authorization", &self.auth)
+            .header("Content-Length", len)
+            .body(reqwest::blocking::Body::sized(f, len))
+            .send()?;
+        if !res.status().is_success() {
+            bail!("{} refused the upload of {} ({})", self.conn.name, file.display(), res.status());
+        }
+        Ok(())
+    }
+
+    /// Moves a file on the server (never overwrites).
+    pub fn move_to(&self, from: &reqwest::Url, to: &reqwest::Url) -> Result<()> {
+        let res = self.send("MOVE", from)?.header("Destination", to.as_str()).header("Overwrite", "F").send()?;
+        if !res.status().is_success() {
+            bail!("{} could not move {} ({})", self.conn.name, from.path(), res.status());
+        }
+        Ok(())
+    }
+}
+
 fn decoded_name(href: &str) -> String {
     let last = href.trim_end_matches('/').rsplit('/').next().unwrap_or("");
     percent_decode(last)
@@ -165,16 +243,19 @@ fn parse_multistatus(xml: &str) -> Vec<Entry> {
     let mut r = quick_xml::Reader::from_str(xml);
     r.config_mut().trim_text(true);
     let (mut out, mut href, mut dir, mut in_href) = (Vec::new(), String::new(), false, false);
+    let (mut size, mut in_len) = (None, false);
     loop {
         match r.read_event() {
             Ok(Event::Start(e)) => match e.local_name().as_ref() {
-                "response" => (href, dir) = (String::new(), false),
+                "response" => (href, dir, size) = (String::new(), false, None),
                 "href" => in_href = true,
+                "getcontentlength" => in_len = true,
                 "collection" => dir = true,
                 _ => {}
             },
             Ok(Event::Empty(e)) if e.local_name().as_ref() == "collection" => dir = true,
             Ok(Event::Text(t)) if in_href => href.push_str(&t.xml10_content()),
+            Ok(Event::Text(t)) if in_len => size = t.xml10_content().trim().parse().ok(),
             Ok(Event::GeneralRef(e)) if in_href => href.push_str(match &*e {
                 "amp" => "&",
                 "lt" => "<",
@@ -185,10 +266,11 @@ fn parse_multistatus(xml: &str) -> Vec<Entry> {
             }),
             Ok(Event::End(e)) => match e.local_name().as_ref() {
                 "href" => in_href = false,
+                "getcontentlength" => in_len = false,
                 "response" if !href.is_empty() => {
                     // some servers send full URLs; keep only the path
                     let path = reqwest::Url::parse(&href).map(|u| u.path().to_string()).unwrap_or_else(|_| href.clone());
-                    out.push(Entry { href: path, dir });
+                    out.push(Entry { href: path, dir, size });
                 }
                 _ => {}
             },
@@ -265,9 +347,9 @@ mod tests {
         </D:multistatus>"#;
         let e = parse_multistatus(xml);
         assert_eq!(e, vec![
-            Entry { href: "/dav/Music/".into(), dir: true },
-            Entry { href: "/dav/Music/Lute%20%26%20Tavern/".into(), dir: true },
-            Entry { href: "/dav/Music/a&b.mp3".into(), dir: false },
+            Entry { href: "/dav/Music/".into(), dir: true, size: None },
+            Entry { href: "/dav/Music/Lute%20%26%20Tavern/".into(), dir: true, size: None },
+            Entry { href: "/dav/Music/a&b.mp3".into(), dir: false, size: None },
         ]);
         assert_eq!(decoded_name("/dav/Music/Lute%20%26%20Tavern/"), "Lute & Tavern");
         let s = song_from_path("/dav/Albums/Linkin%20Park/Meteora/13%20-%20Numb.mp3", None);

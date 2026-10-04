@@ -56,6 +56,8 @@ export interface SyncReport {
   lastRun: { ok: boolean; code: number | null; output: string; at: number } | null;
   conflicts: { path: string; original: string | null; by: string }[];
 }
+export interface BackupSchedule { mode: 'manual' | 'daily' | 'weekly'; day: number; time: string }
+export interface BackupSettings { conn: number | null; folder: string; schedule: BackupSchedule; last: number | null; lastReport: { ok?: boolean; message?: string; failed?: string[] } | null; next: number | null; running: boolean }
 export interface McpInfo { enabled: boolean; running: boolean; url: string; error: string | null }
 export interface Take { id: number; name: string; origin: string; addedAt: number; versionId: number | null }
 export interface Version { id: number; label: string; note: string; createdAt: number }
@@ -118,6 +120,9 @@ export const api = {
   updateInfo: () => invoke<UpdateInfo>('update_info'),
   mcpInfo: () => invoke<McpInfo>('mcp_info'),
   relayBase: () => invoke<string>('relay_base'),
+  backupSettings: () => invoke<BackupSettings>('backup_settings'),
+  setBackupSettings: (conn: number | null, folder: string, schedule: BackupSchedule) => invoke<BackupSettings>('set_backup_settings', { conn, folder, schedule }),
+  backupNow: () => invoke<void>('backup_now'),
   syncSettings: () => invoke<SyncSettings>('sync_settings'),
   setSyncSettings: (kind: string, address: string, command: string, apiKey: string | null) => invoke<void>('set_sync_settings', { kind, address, command, apiKey }),
   syncStatus: () => invoke<SyncReport>('sync_status'),

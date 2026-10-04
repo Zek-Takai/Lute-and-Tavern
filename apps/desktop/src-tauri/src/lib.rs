@@ -1,6 +1,7 @@
 //! Lute & Tavern desktop app: Tauri commands over lt-core, the `lt://` file protocol and the music-folder watcher.
 
 mod assistant;
+mod backup;
 mod log;
 mod mcp;
 mod musickit;
@@ -438,6 +439,7 @@ pub fn run() {
             let handle = app.handle().clone();
             // Servers with "In My music" on: refresh their songs in the background.
             sources::sync_all(app.handle());
+            backup::start_scheduler(app.handle());
             // Catch up on anything that changed while the app was closed, then start watching.
             tauri::async_runtime::spawn_blocking(move || {
                 let state = handle.state::<AppState>();
@@ -522,6 +524,9 @@ pub fn run() {
             sources::remote_library_sync,
             sources::connection_set_in_library,
             sync::sync_settings,
+            backup::backup_settings,
+            backup::set_backup_settings,
+            backup::backup_now,
             sync::set_sync_settings,
             sync::sync_status,
             sync::sync_now,

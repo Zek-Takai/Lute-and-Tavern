@@ -320,6 +320,15 @@ export async function initSources() {
     return api.remoteStream(Number(id), song);
   };
   aiHooks.play_station = (cmd) => playStation(cmd.station as Station);
+  await listen<{ state: string; message: string }>('backup', (e) => {
+    const el = document.getElementById('bStatus');
+    if (el) el.textContent = e.payload.message;
+    if (e.payload.state !== 'running') {
+      toast(e.payload.message);
+      const b = document.getElementById('bNow') as HTMLButtonElement | null;
+      if (b) b.disabled = false;
+    }
+  });
   await listen<{ id: number; state: string; message: string }>('remote-sync', (e) => {
     syncStatus.set(e.payload.id, { state: e.payload.state, message: e.payload.message });
     const el = document.querySelector<HTMLElement>(`[data-sync-status="${e.payload.id}"]`);

@@ -3,6 +3,7 @@
 
 pub mod assistant;
 pub mod audio;
+pub mod backup;
 pub mod control;
 pub mod db;
 pub mod genre;

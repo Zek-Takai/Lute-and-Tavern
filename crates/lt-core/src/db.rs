@@ -174,6 +174,17 @@ const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE connections ADD COLUMN extra TEXT NOT NULL DEFAULT '{}';
     "#,
+    // v10: what the backup has already put on each server (path inside the library folder, size, mtime).
+    r#"
+    CREATE TABLE backup_files (
+        conn_id     INTEGER NOT NULL REFERENCES connections(id) ON DELETE CASCADE,
+        rel         TEXT NOT NULL,
+        size        INTEGER NOT NULL,
+        mtime       INTEGER NOT NULL,
+        uploaded_at INTEGER NOT NULL,
+        PRIMARY KEY (conn_id, rel)
+    );
+    "#,
 ];
 
 pub fn open(path: &std::path::Path) -> Result<Connection> {
