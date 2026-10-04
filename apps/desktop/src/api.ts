@@ -57,6 +57,22 @@ export interface SyncReport {
   conflicts: { path: string; original: string | null; by: string }[];
 }
 export interface BackupSchedule { mode: 'manual' | 'daily' | 'weekly'; day: number; time: string }
+export interface PlaylistSyncLast {
+  at: number;
+  ok: boolean;
+  message?: string;
+  report?: { sent: number; received: number; deletedHere: number; deletedThere: number };
+}
+
+export interface ImportedPlaylist {
+  playlist: string;
+  id: number;
+  matched: number;
+  total: number;
+  duplicates: number;
+  missing: string[];
+}
+
 export interface BackupSettings { conn: number | null; folder: string; schedule: BackupSchedule; last: number | null; lastReport: { ok?: boolean; message?: string; failed?: string[] } | null; next: number | null; running: boolean }
 export interface McpInfo { enabled: boolean; running: boolean; url: string; error: string | null }
 export interface Take { id: number; name: string; origin: string; addedAt: number; versionId: number | null }
@@ -123,6 +139,8 @@ export const api = {
   backupSettings: () => invoke<BackupSettings>('backup_settings'),
   setBackupSettings: (conn: number | null, folder: string, schedule: BackupSchedule) => invoke<BackupSettings>('set_backup_settings', { conn, folder, schedule }),
   backupNow: () => invoke<void>('backup_now'),
+  syncPlaylists: () => invoke<{ ran: boolean; last: PlaylistSyncLast | null }>('sync_playlists'),
+  importPlaylists: (files: string[]) => invoke<ImportedPlaylist[]>('import_playlists', { files }),
   syncSettings: () => invoke<SyncSettings>('sync_settings'),
   setSyncSettings: (kind: string, address: string, command: string, apiKey: string | null) => invoke<void>('set_sync_settings', { kind, address, command, apiKey }),
   syncStatus: () => invoke<SyncReport>('sync_status'),

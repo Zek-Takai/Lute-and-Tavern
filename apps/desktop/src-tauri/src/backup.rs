@@ -147,6 +147,7 @@ pub fn start(app: &AppHandle) -> Result<(), String> {
                 let _ = state.lib.set_setting("backupLast", &Value::from(now));
                 let _ = state.lib.set_setting("backupLastReport", &json!({"ok": r.failed.is_empty(), "message": msg, "failed": r.failed}));
                 send(if r.failed.is_empty() { "done" } else { "partial" }, msg);
+                let _ = crate::playlists::sync_now(&app);
             }
             Err(e) => {
                 let msg = format!("Backup failed: {e:#}");

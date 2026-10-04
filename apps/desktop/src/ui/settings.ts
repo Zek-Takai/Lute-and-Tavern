@@ -1,7 +1,7 @@
 // Settings: the songwriter connection, music folders, genre tags and the sidebar's starting tab.
 import { audioDir, join } from '@tauri-apps/api/path';
 import { message, open as pickFolder } from '@tauri-apps/plugin-dialog';
-import { api, errText, type McpInfo, type PlexServer, type SpeechSettings, type SyncSettings, type UpdateInfo, type BackupSettings, type BackupSchedule } from '../api';
+import { api, errText, type McpInfo, type PlexServer, type SpeechSettings, type SyncSettings, type UpdateInfo, type BackupSettings, type BackupSchedule, type PlaylistSyncLast } from '../api';
 import { comboOf, DEFAULT_KEYS, keyLabel } from './assistant';
 import { connections, loadConnections, syncStatus } from './sources';
 import { applyLineColor, applySkin, LINE_COLORS, SKINS } from '../player';
@@ -44,6 +44,14 @@ const KIND_HELP: Record<string, string> = {
   webdav: 'Plays music straight from a shared folder, browsed as folders, with no playlists or music search. Use it for plain NAS shares or rclone. For Nextcloud, choose the Music server kind instead.',
 };
 let addKind = 'plex';
+function plSyncText(l?: PlaylistSyncLast): string {
+  if (!l) return '';
+  if (!l.ok) return l.message ?? 'Playlist sync failed.';
+  const r = l.report;
+  const did = r ? [r.sent && `${r.sent} sent`, r.received && `${r.received} received`, (r.deletedHere + r.deletedThere) && `${r.deletedHere + r.deletedThere} removed`].filter(Boolean).join(', ') : '';
+  return `Playlists synced ${new Date(l.at * 1000).toLocaleString()}${did ? ` (${did})` : ''}.`;
+}
+
 let backupCfg: BackupSettings = { conn: null, folder: 'Music/Lute & Tavern', schedule: { mode: 'weekly', day: 0, time: '16:00' }, last: null, lastReport: null, next: null, running: false };
 let syncCfg: SyncSettings = { kind: 'none', address: 'http://127.0.0.1:8384', command: '', hasKey: false };
 let mcp: McpInfo = { enabled: false, running: false, url: '', error: null };
@@ -259,6 +267,8 @@ function render() {
           ${backupCfg.schedule.mode !== 'manual' ? `<input id="bTime" type="time" value="${esc(backupCfg.schedule.time)}" style="width:auto">` : ''}</span>
       </div>
       <div class="row"><button class="btn primary" id="bSave">Save</button>${backupCfg.conn ? `<button class="btn" id="bNow" ${backupCfg.running ? 'disabled' : ''}>Back up now</button>` : ''}<span class="muted small" id="bStatus">${esc(backupCfg.running ? 'Backing up…' : backupCfg.lastReport?.message ?? '')}</span></div>
+      <label class="row small"><input type="checkbox" id="bPlaylists" ${state.settings.playlistSync === false ? '' : 'checked'} ${backupCfg.conn ? '' : 'disabled'}> Keep my playlists the same on all my devices (saved as .m3u8 files in a Playlists folder there; made, changed and deleted playlists follow)</label>
+      ${backupCfg.conn && state.settings.playlistSync !== false ? `<div class="row"><button class="btn small" id="bPlSync">Sync playlists now</button><span class="muted small" id="bPlStatus">${esc(plSyncText(state.settings.playlistSyncLast as PlaylistSyncLast | undefined))}</span></div>` : ''}
       <p class="muted small">${backupCfg.last ? `Last backup ${new Date(backupCfg.last * 1000).toLocaleString()}. ` : ''}${backupCfg.next && backupCfg.schedule.mode !== 'manual' && backupCfg.conn ? `Next ${new Date(backupCfg.next * 1000).toLocaleString()} (if the app is closed then, it runs when it next opens).` : ''}</p>
     </section>
 
@@ -573,6 +583,21 @@ function render() {
       $('#bStatus').textContent = errText(e);
     }
   };
+  $<HTMLInputElement>('#bPlaylists').onchange = async (e) => {
+    await saveSetting('playlistSync', (e.target as HTMLInputElement).checked);
+    render();
+  };
+  document.getElementById('bPlSync')?.addEventListener('click', async () => {
+    const st = $('#bPlStatus');
+    st.textContent = 'Syncing playlists…';
+    try {
+      const r = await api.syncPlaylists();
+      if (r.last) state.settings.playlistSyncLast = r.last;
+      st.textContent = r.ran ? plSyncText(r.last ?? undefined) : 'Set up a backup connection first.';
+    } catch (e) {
+      st.textContent = errText(e);
+    }
+  });
   document.getElementById('bNow')?.addEventListener('click', async () => {
     try {
       await api.backupNow();

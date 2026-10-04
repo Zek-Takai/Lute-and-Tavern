@@ -16,6 +16,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// A lasting id for something that follows the person across devices (time + content, hashed).
+pub fn new_uuid(seed: &str) -> String {
+    let t = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    sha1_smol::Sha1::from(format!("{t}{seed}{:p}", &t).as_bytes()).digest().to_string()[..20].to_string()
+}
+
 pub fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1123,8 +1129,8 @@ impl Library {
         let id = {
             let db = self.db();
             db.execute(
-                "INSERT INTO playlists(name, created_at) VALUES (?1, ?2)",
-                params![name.trim(), now()],
+                "INSERT INTO playlists(name, created_at, uuid, updated_at) VALUES (?1, ?2, ?3, ?2)",
+                params![name.trim(), now(), new_uuid(name)],
             )?;
             db.last_insert_rowid()
         };
@@ -1145,12 +1151,38 @@ impl Library {
             "UPDATE playlists SET name = ?2 WHERE id = ?1",
             params![id, name],
         )?;
+        self.touch_playlist(id)
+    }
+
+    /// Deletes a playlist and remembers the deletion, so other devices delete it too.
+    pub fn delete_playlist(&self, id: i64) -> Result<()> {
+        self.ensure_playlist_uuids()?;
+        let db = self.db();
+        db.execute(
+            "INSERT OR REPLACE INTO playlist_tombstones(uuid, name, deleted_at) SELECT uuid, name, ?2 FROM playlists WHERE id = ?1 AND uuid IS NOT NULL",
+            params![id, now()],
+        )?;
+        db.execute("DELETE FROM playlists WHERE id = ?1", [id])?;
         Ok(())
     }
 
-    pub fn delete_playlist(&self, id: i64) -> Result<()> {
-        self.db()
-            .execute("DELETE FROM playlists WHERE id = ?1", [id])?;
+    /// Marks a playlist as just changed (for following across devices).
+    pub fn touch_playlist(&self, id: i64) -> Result<()> {
+        self.ensure_playlist_uuids()?;
+        self.db().execute("UPDATE playlists SET updated_at = ?2 WHERE id = ?1", params![id, now()])?;
+        Ok(())
+    }
+
+    /// Gives playlists from before cross-device playlists a lasting id.
+    pub fn ensure_playlist_uuids(&self) -> Result<()> {
+        let missing: Vec<(i64, String)> = {
+            let db = self.db();
+            let mut st = db.prepare("SELECT id, name FROM playlists WHERE uuid IS NULL")?;
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.filter_map(|r| r.ok()).collect()
+        };
+        for (id, name) in missing {
+            self.db().execute("UPDATE playlists SET uuid = ?2, updated_at = MAX(updated_at, created_at) WHERE id = ?1", params![id, new_uuid(&format!("{id}{name}"))])?;
+        }
         Ok(())
     }
 
@@ -1165,11 +1197,13 @@ impl Library {
                 params![id, s, pos as i64],
             )?;
         }
+        tx.execute("UPDATE playlists SET updated_at = ?2 WHERE id = ?1", params![id, now()])?;
         tx.commit()?;
         Ok(())
     }
 
     pub fn toggle_in_playlist(&self, id: i64, song: i64, on: bool) -> Result<()> {
+        {
         let db = self.db();
         if on {
             let pos: i64 = db.query_row(
@@ -1184,7 +1218,8 @@ impl Library {
                 params![id, song],
             )?;
         }
-        Ok(())
+        }
+        self.touch_playlist(id)
     }
 
     // ---------- settings ----------

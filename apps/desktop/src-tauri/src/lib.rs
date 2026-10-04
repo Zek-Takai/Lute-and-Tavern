@@ -4,6 +4,7 @@ mod assistant;
 mod backup;
 mod log;
 mod mcp;
+mod playlists;
 mod musickit;
 mod protocol;
 mod relay;
@@ -440,6 +441,7 @@ pub fn run() {
             // Servers with "In My music" on: refresh their songs in the background.
             sources::sync_all(app.handle());
             backup::start_scheduler(app.handle());
+            playlists::start(app.handle());
             // Catch up on anything that changed while the app was closed, then start watching.
             tauri::async_runtime::spawn_blocking(move || {
                 let state = handle.state::<AppState>();
@@ -475,6 +477,8 @@ pub fn run() {
             delete_playlist,
             set_playlist_songs,
             toggle_in_playlist,
+            playlists::sync_playlists,
+            playlists::import_playlists,
             create_genre,
             rename_genre,
             delete_genre,

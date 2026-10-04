@@ -120,7 +120,7 @@ fn strip_track_number(stem: &str) -> String {
     t.to_string()
 }
 
-fn parse_m3u(text: &str, name: &str) -> ParsedPlaylist {
+pub fn parse_m3u(text: &str, name: &str) -> ParsedPlaylist {
     let mut out = ParsedPlaylist { name: name.into(), entries: vec![] };
     let mut pending: Option<PlEntry> = None;
     for line in text.lines().map(str::trim) {

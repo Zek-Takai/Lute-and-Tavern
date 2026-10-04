@@ -190,6 +190,33 @@ impl WebDav<'_> {
         Ok(())
     }
 
+    /// A small file's contents, or None when it isn't there.
+    pub fn get_bytes(&self, url: &reqwest::Url) -> Result<Option<Vec<u8>>> {
+        let res = self.send("GET", url)?.send()?;
+        match res.status().as_u16() {
+            404 => Ok(None),
+            s if (200..300).contains(&s) => Ok(Some(res.bytes()?.to_vec())),
+            s => bail!("{} answered {s} for {}", self.conn.name, url.path()),
+        }
+    }
+
+    pub fn put_bytes(&self, url: &reqwest::Url, bytes: Vec<u8>) -> Result<()> {
+        let res = self.send("PUT", url)?.body(bytes).send()?;
+        if !res.status().is_success() {
+            bail!("{} refused to save {} ({})", self.conn.name, url.path(), res.status());
+        }
+        Ok(())
+    }
+
+    /// Deletes one file (used only for playlist files the person deleted).
+    pub fn delete(&self, url: &reqwest::Url) -> Result<()> {
+        let res = self.send("DELETE", url)?.send()?;
+        if !(res.status().is_success() || res.status().as_u16() == 404) {
+            bail!("{} could not delete {} ({})", self.conn.name, url.path(), res.status());
+        }
+        Ok(())
+    }
+
     /// Moves a file on the server (never overwrites).
     pub fn move_to(&self, from: &reqwest::Url, to: &reqwest::Url) -> Result<()> {
         let res = self.send("MOVE", from)?.header("Destination", to.as_str()).header("Overwrite", "F").send()?;

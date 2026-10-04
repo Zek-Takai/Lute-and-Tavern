@@ -150,13 +150,13 @@ pub fn run(lib: &Library, dav: &WebDav, conn: i64, folder: &str, root: &Path, pr
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::remote::Connection;
     use std::sync::{Arc, Mutex};
 
     /// A tiny in-memory WebDAV server: PROPFIND depth 0, MKCOL, PUT, MOVE.
-    fn fake_dav() -> (String, Arc<Mutex<HashMap<String, Option<Vec<u8>>>>>) {
+    pub(crate) fn fake_dav() -> (String, Arc<Mutex<HashMap<String, Option<Vec<u8>>>>>) {
         let store: Arc<Mutex<HashMap<String, Option<Vec<u8>>>>> = Arc::new(Mutex::new(HashMap::new()));
         store.lock().unwrap().insert("/dav/".into(), None);
         let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
@@ -201,6 +201,17 @@ mod tests {
                         }
                         tiny_http::Response::from_string("").with_status_code(201)
                     }
+                    "GET" => match find(&s) {
+                        Some((_, Some(b))) => tiny_http::Response::from_data(b),
+                        _ => tiny_http::Response::from_data(Vec::new()).with_status_code(404),
+                    },
+                    "DELETE" => match find(&s) {
+                        Some((k, _)) => {
+                            s.remove(&k);
+                            tiny_http::Response::from_data(Vec::new()).with_status_code(204)
+                        }
+                        None => tiny_http::Response::from_data(Vec::new()).with_status_code(404),
+                    },
                     _ => tiny_http::Response::from_string("").with_status_code(405),
                 };
                 drop(s);

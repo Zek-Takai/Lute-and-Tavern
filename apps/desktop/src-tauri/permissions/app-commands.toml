@@ -21,6 +21,8 @@ commands.allow = [
   "delete_playlist",
   "set_playlist_songs",
   "toggle_in_playlist",
+  "sync_playlists",
+  "import_playlists",
   "create_genre",
   "rename_genre",
   "delete_genre",

@@ -185,6 +185,16 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (conn_id, rel)
     );
     "#,
+    // v11: playlists that follow the person across devices: a lasting id, a change time, and deletions.
+    r#"
+    ALTER TABLE playlists ADD COLUMN uuid TEXT;
+    ALTER TABLE playlists ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE playlist_tombstones (
+        uuid       TEXT PRIMARY KEY,
+        name       TEXT NOT NULL,
+        deleted_at INTEGER NOT NULL
+    );
+    "#,
 ];
 
 pub fn open(path: &std::path::Path) -> Result<Connection> {

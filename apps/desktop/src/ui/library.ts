@@ -1,5 +1,6 @@
 // Sidebar (Library / Playlists / Genres), the view header, status chips and the song grid.
 import { api, errText, lt, type Song } from '../api';
+import { message, open as pickFiles } from '@tauri-apps/plugin-dialog';
 import { playSong, syncIcons } from '../player';
 import { keyName, staffSVG, toMeasures } from '../music/notation';
 import { albums, genresInUse, inMainLibrary, isExternalView, playable, rerender, reload, saveSetting, stage, state, viewName, visible, writerName, type SideTab } from '../state';
@@ -87,7 +88,7 @@ export function renderSide() {
     });
   }
   if (state.sideTab === 'servers') rows = serversPanel();
-  const add = state.sideTab === 'playlists' ? '<button class="linkbtn" id="plNew">+ New</button>' : '';
+  const add = state.sideTab === 'playlists' ? '<button class="linkbtn" id="plImport" title="Import playlists from another app (M3U, PLS, XSPF, iTunes/Music Library.xml, CSV...)">Import</button> <button class="linkbtn" id="plNew">+ New</button>' : '';
   $('#side').innerHTML = `<header class="side-head"><h2>${TAB_NAME[state.sideTab]}</h2>${add}</header>
     <input class="inline-input side-find" id="sideFind" type="search" placeholder="Find ${TAB_NAME[state.sideTab].toLowerCase()}…" value="${esc(sideQuery)}" aria-label="Find in ${TAB_NAME[state.sideTab]}">
     <section class="side-list" id="sideList">${rows}</section>`;
@@ -231,6 +232,32 @@ export function initLibrary(actions: { addFolder: () => void; request: () => voi
     const t = e.target as HTMLElement;
     if (state.sideTab === 'apple' && (await handleApplePanelClick(t, actions.settings))) return;
     if ((state.sideTab === 'radio' || state.sideTab === 'servers') && handleSourcePanelClick(t)) return;
+    if (t.id === 'plImport') {
+      const files = await pickFiles({
+        multiple: true,
+        title: 'Import playlists',
+        filters: [{ name: 'Playlists', extensions: ['m3u', 'm3u8', 'pls', 'xspf', 'wpl', 'xml', 'csv', 'txt', 'json'] }],
+      });
+      if (!files || !files.length) return;
+      try {
+        toast('Importing playlists…');
+        const res = await api.importPlaylists(Array.isArray(files) ? files : [files]);
+        await reload();
+        rerender();
+        if (!res.length) return void (await message('No playlists were found in those files.', { title: 'Import playlists' }));
+        const found = res.reduce((n, r) => n + r.matched, 0), total = res.reduce((n, r) => n + r.total, 0);
+        const reps = res.reduce((n, r) => n + r.duplicates, 0);
+        const missing = res.flatMap((r) => r.missing.map((m) => `${r.playlist}: ${m}`));
+        const lines = [
+          `Imported ${res.length} playlist${res.length === 1 ? '' : 's'}. Found ${found} of ${total} songs in your library${reps ? ` (${reps} repeat${reps === 1 ? '' : 's'} kept once)` : ''}.`,
+          ...(missing.length ? ['', `Not in your library (${missing.length}):`, ...missing.slice(0, 25), ...(missing.length > 25 ? [`…and ${missing.length - 25} more`] : [])] : []),
+        ];
+        await message(lines.join('\n'), { title: 'Import playlists' });
+      } catch (err) {
+        toast(errText(err));
+      }
+      return;
+    }
     if (t.id === 'plNew') {
       try {
         const n = state.playlists.length + 1;
