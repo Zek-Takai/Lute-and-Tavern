@@ -47,6 +47,11 @@ pub struct RemoteItem {
     pub count: Option<i64>,
     /// When the song was added on the server (Unix seconds), if it says
     pub added: Option<i64>,
+    /// The song's file on the server and its size, if the server says (matched to the server's song ID list)
+    #[serde(skip)]
+    pub path: Option<String>,
+    #[serde(skip)]
+    pub size: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

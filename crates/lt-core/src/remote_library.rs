@@ -88,12 +88,13 @@ impl Library {
                 let existed: bool = tx.query_row("SELECT COUNT(*) FROM songs WHERE provider = 'remote' AND provider_id = ?1", [&pid], |r| r.get::<_, i64>(0))? > 0;
                 // Added = when the server got the song (unknown → oldest), so server songs never bury new local ones.
                 tx.execute(
-                    "INSERT INTO songs(source, provider, provider_id, title, artist, album, year, genre, track, duration, art, added_at, updated_at) \
-                     VALUES ('library', 'remote', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?11, ?10) \
+                    "INSERT INTO songs(source, provider, provider_id, title, artist, album, year, genre, track, duration, art, added_at, updated_at, remote_path, remote_size) \
+                     VALUES ('library', 'remote', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?11, ?10, ?12, ?13) \
                      ON CONFLICT(provider, provider_id) WHERE provider_id IS NOT NULL DO UPDATE SET title = excluded.title, artist = excluded.artist, \
                      album = excluded.album, year = excluded.year, genre = excluded.genre, track = excluded.track, duration = excluded.duration, \
-                     art = COALESCE(excluded.art, songs.art), added_at = excluded.added_at",
-                    params![pid, it.name, it.artist, it.album, it.year, genres[&it.genre], it.track, it.duration, cover, t, it.added.unwrap_or(0)],
+                     art = COALESCE(excluded.art, songs.art), added_at = excluded.added_at, \
+                     remote_path = COALESCE(excluded.remote_path, songs.remote_path), remote_size = COALESCE(excluded.remote_size, songs.remote_size)",
+                    params![pid, it.name, it.artist, it.album, it.year, genres[&it.genre], it.track, it.duration, cover, t, it.added.unwrap_or(0), it.path, it.size],
                 )?;
                 if existed { report.updated += 1 } else { report.added += 1 }
             }
@@ -118,6 +119,53 @@ impl Library {
             tx.commit()?;
         }
         Ok(report)
+    }
+
+    /// Gives server songs their song IDs from the server's song ID list (`Shows/song-ids.tsv`, made by
+    /// lt-songid --index over the server's music folder): each line "<id>\t<size>\t<path>". A server song
+    /// matches the line whose path ends its own reported path's end, with the same size. Returns how many got one.
+    pub fn map_remote_uids(&self, list: &str) -> Result<usize> {
+        let mut by_name: HashMap<String, Vec<(&str, i64, &str)>> = HashMap::new();
+        for line in list.lines() {
+            let mut f = line.splitn(3, '\t');
+            let (Some(uid), Some(size), Some(rel)) = (f.next(), f.next(), f.next()) else { continue };
+            if !uid.starts_with("LT-") {
+                continue;
+            }
+            let name = rel.rsplit('/').next().unwrap_or(rel).to_lowercase();
+            by_name.entry(name).or_default().push((uid, size.parse().unwrap_or(-1), rel));
+        }
+        let pending: Vec<(i64, String, Option<i64>)> = {
+            let db = self.db();
+            let mut st = db.prepare("SELECT id, remote_path, remote_size FROM songs WHERE provider = 'remote' AND uid IS NULL AND remote_path IS NOT NULL")?;
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.filter_map(|r| r.ok()).collect()
+        };
+        let mut n = 0;
+        for (id, path, size) in pending {
+            let path = path.replace('\\', "/");
+            let name = path.rsplit('/').next().unwrap_or(&path).to_lowercase();
+            let Some(cands) = by_name.get(&name) else { continue };
+            let same_size = |s: i64| size.is_none_or(|z| z == s);
+            let hit = cands
+                .iter()
+                .find(|(_, s, rel)| same_size(*s) && (path == *rel || path.ends_with(&format!("/{rel}"))))
+                // the server counts paths from a different starting folder: the one file of that name and size
+                .or_else(|| {
+                    let same: Vec<_> = cands.iter().filter(|(_, s, _)| size.is_some() && same_size(*s)).collect();
+                    (same.len() == 1).then(|| same[0])
+                });
+            let Some((uid, _, _)) = hit else { continue };
+            // an ID already taken here (the same audio as a song on this device): this one is a copy
+            let mut u = uid.to_string();
+            let mut k = 2;
+            while self.db().query_row("SELECT COUNT(*) FROM songs WHERE uid = ?1", [&u], |r| r.get::<_, i64>(0))? > 0 {
+                u = crate::songid::variant(uid, k);
+                k += 1;
+            }
+            self.db().execute("UPDATE songs SET uid = ?2 WHERE id = ?1", params![id, u])?;
+            n += 1;
+        }
+        Ok(n)
     }
 
     /// Takes a connection's songs out of the library (connection removed or "In My music" turned off).
@@ -204,5 +252,26 @@ mod tests {
             st.query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect()
         };
         assert_eq!(in_playlist, [local], "the playlist now holds the local copy");
+    }
+
+    #[test]
+    fn server_songs_get_their_ids_from_the_server_list() {
+        let d = tempfile::tempdir().unwrap();
+        let l = Library::open(&d.path().join("app")).unwrap();
+        {
+            let db = l.db();
+            // as Nextcloud Music reports them: from the user's files root
+            db.execute("INSERT INTO songs(source, provider, provider_id, title, added_at, updated_at, remote_path, remote_size) VALUES ('library', 'remote', '1:a', 'Numb', 1, 1, '/Music/Lute & Tavern/Albums/Linkin Park/Meteora/13 - Numb.mp3', 4000)", []).unwrap();
+            db.execute("INSERT INTO songs(source, provider, provider_id, title, added_at, updated_at, remote_path, remote_size) VALUES ('library', 'remote', '1:b', 'Esaul', 1, 1, '/Music/Lute & Tavern/Albums/Linkin Park/EP/03 - Esaul.mp3', 300)", []).unwrap();
+            db.execute("INSERT INTO songs(source, provider, provider_id, title, added_at, updated_at, remote_path, remote_size) VALUES ('library', 'remote', '1:c', 'Gone', 1, 1, '/Music/elsewhere/x.mp3', 1)", []).unwrap();
+        }
+        let list = "LT-AAAA-0000-0000-0000-0000-0000-0000-0001\t4000\tLute & Tavern/Albums/Linkin Park/Meteora/13 - Numb.mp3\n\
+                    LT-AAAA-0000-0000-0000-0000-0000-0000-0002\t300\tLute & Tavern/Albums/Linkin Park/Demo/03 - Esaul.mp3\n\
+                    LT-AAAA-0000-0000-0000-0000-0000-0000-0003\t300\tLute & Tavern/Albums/Linkin Park/EP/03 - Esaul.mp3\n";
+        assert_eq!(l.map_remote_uids(list).unwrap(), 2);
+        let uid = |pid: &str| l.db().query_row("SELECT uid FROM songs WHERE provider_id = ?1", [pid], |r| r.get::<_, Option<String>>(0)).unwrap();
+        assert_eq!(uid("1:a").as_deref(), Some("LT-AAAA-0000-0000-0000-0000-0000-0000-0001"));
+        assert_eq!(uid("1:b").as_deref(), Some("LT-AAAA-0000-0000-0000-0000-0000-0000-0003"), "same name and size: the path decides");
+        assert_eq!(uid("1:c"), None, "not in the list: waits");
     }
 }

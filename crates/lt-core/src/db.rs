@@ -218,6 +218,11 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE songs ADD COLUMN uid TEXT;
     CREATE INDEX songs_uid ON songs(uid);
     "#,
+    // v15: a server song's file path and size, as the server reports them, to match it to its song ID
+    r#"
+    ALTER TABLE songs ADD COLUMN remote_path TEXT;
+    ALTER TABLE songs ADD COLUMN remote_size INTEGER;
+    "#,
 ];
 
 pub fn open(path: &std::path::Path) -> Result<Connection> {

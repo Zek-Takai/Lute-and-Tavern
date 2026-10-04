@@ -103,6 +103,8 @@ fn item(v: &Value) -> RemoteItem {
         track: v["IndexNumber"].as_i64().filter(|_| kind == "song"),
         count: v["ChildCount"].as_i64().or(v["SongCount"].as_i64()),
         added: v["DateCreated"].as_str().and_then(crate::remote::iso_time),
+        path: None,
+        size: None,
     }
 }
 
