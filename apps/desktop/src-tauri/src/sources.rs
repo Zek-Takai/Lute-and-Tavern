@@ -173,19 +173,38 @@ fn sync_library(lib: &lt_core::Library, id: i64, force: bool, progress: &dyn Fn(
             .collect();
         need.sort();
         need.dedup();
-        let mut art = std::collections::HashMap::new();
-        for (n, c) in need.iter().enumerate() {
-            if n % 25 == 0 {
-                progress(format!("Fetching covers {}/{}…", n, need.len()));
+        // Covers come from the server itself; fetch 8 at a time so a slow route (a VPN relay) doesn't add up.
+        let targets: Vec<(String, remote::Target)> = need.iter().filter_map(|c| s.cover(c, 600).map(|t| (c.clone(), t))).collect();
+        let done = std::sync::atomic::AtomicUsize::new(0);
+        let total = targets.len();
+        let fetched: Vec<(String, Vec<u8>)> = std::thread::scope(|sc| {
+            let chunk = total.div_ceil(8).max(1);
+            let handles: Vec<_> = targets
+                .chunks(chunk)
+                .map(|part| {
+                    let done = &done;
+                    sc.spawn(move || {
+                        part.iter()
+                            .filter_map(|(c, t)| {
+                                let got = remote::fetch(t).ok().filter(|b| b.len() > 100).map(|b| (c.clone(), b));
+                                done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                got
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            // report progress while the readers work
+            while handles.iter().any(|h| !h.is_finished()) {
+                progress(format!("Fetching covers {}/{total}…", done.load(std::sync::atomic::Ordering::Relaxed)));
+                std::thread::sleep(std::time::Duration::from_millis(700));
             }
-            if let Some(t) = s.cover(c, 600) {
-                if let Ok(bytes) = remote::fetch(&t) {
-                    if bytes.len() > 100 {
-                        if let Ok(name) = lib.store_cover(&bytes) {
-                            art.insert(c.clone(), name);
-                        }
-                    }
-                }
+            handles.into_iter().flat_map(|h| h.join().unwrap_or_default()).collect()
+        });
+        let mut art = std::collections::HashMap::new();
+        for (c, bytes) in fetched {
+            if let Ok(name) = lib.store_cover(&bytes) {
+                art.insert(c, name);
             }
         }
         progress(format!("Adding {} songs…", items.len()));
