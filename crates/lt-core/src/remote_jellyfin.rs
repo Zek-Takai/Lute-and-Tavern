@@ -54,7 +54,7 @@ pub struct Jellyfin<'a> {
     pub token: &'a str,
 }
 
-const FIELDS: &str = "Fields=Genres,ChildCount,ProductionYear,AlbumArtist&EnableImageTypes=Primary";
+const FIELDS: &str = "Fields=Genres,ChildCount,ProductionYear,AlbumArtist,DateCreated&EnableImageTypes=Primary";
 
 impl Jellyfin<'_> {
     fn user(&self) -> &str {
@@ -102,6 +102,7 @@ fn item(v: &Value) -> RemoteItem {
         duration: v["RunTimeTicks"].as_f64().map(|t| t / 10_000_000.0),
         track: v["IndexNumber"].as_i64().filter(|_| kind == "song"),
         count: v["ChildCount"].as_i64().or(v["SongCount"].as_i64()),
+        added: v["DateCreated"].as_str().and_then(crate::remote::iso_time),
     }
 }
 

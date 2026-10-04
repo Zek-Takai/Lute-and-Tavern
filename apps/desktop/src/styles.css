@@ -12,7 +12,7 @@
 *{box-sizing:border-box}
 html,body{background:var(--paper)}
 body{color:var(--ink);font:15px/1.5 var(--body);padding-inline:16px;padding-block:0 96px}
-.wrap{max-width:1240px;margin:0 auto;position:relative;z-index:1}
+.wrap{max-width:none;margin:0;position:relative;z-index:1}
 #viz{position:fixed;inset:0;width:100vw;height:100vh;display:block;z-index:0}
 .veil{position:fixed;inset:0;z-index:0;pointer-events:none;background:radial-gradient(ellipse 85% 75% at 50% 45%,transparent 35%,rgba(11,13,36,.7))}
 body .glass,body .card,body .search input,body .btn:not(.primary),body .bar select,body .chip:not([aria-pressed="true"]),body .player{background:var(--glass);-webkit-backdrop-filter:blur(14px) saturate(1.25);backdrop-filter:blur(14px) saturate(1.25)}
@@ -56,7 +56,7 @@ button{cursor:pointer}
 .bar select{border:1px solid var(--line);border-radius:10px;padding:7px 10px;background:var(--surface)}
 
 /* Cards */
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:18px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:18px}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;cursor:pointer;transition:border-color .15s,transform .15s}
 .card:hover{border-color:var(--accent);transform:translateY(-2px)}
 .card .staff{background:var(--staff);padding:10px 10px 4px;border-bottom:1px solid var(--line);color:var(--ink)}
@@ -164,7 +164,7 @@ dialog[open]{animation:pop .18s ease-out}
 #req{width:min(560px,100%)}
 /* Player */
 .player{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));z-index:5}
-.player .in{max-width:1180px;margin:0 auto;display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
+.player .in{max-width:none;margin:0;display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
 .player .t{min-width:0;flex:0 1 240px}
 .player .t b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .progress{flex:1;height:4px;border-radius:4px;background:var(--line);overflow:hidden}
@@ -194,7 +194,7 @@ dialog[open]{animation:pop .18s ease-out}
 .view-head input{background:transparent;border:1px dashed transparent;border-radius:8px;padding:0 6px;margin-left:-7px;min-width:0;width:auto;max-width:100%}
 .view-head input:hover,.view-head input:focus{border-color:var(--line)}
 .view-head .meta{margin-right:auto}
-.card .cover{aspect-ratio:16/10;background:var(--staff) center/cover no-repeat;border-bottom:1px solid var(--line);display:grid;place-items:center;font:700 44px/1 var(--display);color:rgba(255,255,255,.85)}
+.card .cover{aspect-ratio:1;background:var(--staff) center/cover no-repeat;border-bottom:1px solid var(--line);display:grid;place-items:center;font:700 44px/1 var(--display);color:rgba(255,255,255,.85)}
 .gtag{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:2px 9px;color:var(--ink-2);white-space:nowrap}
 .details{display:grid;grid-template-columns:200px minmax(0,1fr);gap:22px;margin-bottom:20px}
 .art{aspect-ratio:1;border-radius:12px;background:var(--staff) center/cover no-repeat;border:1px solid var(--line);display:grid;place-items:center;color:var(--ink-2);font-size:13px;margin-bottom:10px}

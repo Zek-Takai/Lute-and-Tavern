@@ -186,6 +186,7 @@ fn item(v: &Value) -> RemoteItem {
         duration: v["duration"].as_f64().map(|ms| ms / 1000.0),
         track: v["index"].as_i64().filter(|_| kind == "song"),
         count: v["leafCount"].as_i64().or(v["childCount"].as_i64()),
+        added: v["addedAt"].as_i64(),
     }
 }
 

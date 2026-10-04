@@ -160,3 +160,6 @@ nav.rail { position: sticky; top: 16px; display: flex; flex-direction: column; a
 
 /* Settings: the title bar and Done stay in view while the settings scroll */
 .settings .set-top{position:sticky;top:-22px;z-index:3;justify-content:space-between;margin:-22px -24px 0;padding:22px 24px 12px;background:var(--surface);border-bottom:1px solid var(--line)}
+
+/* player bar artwork: a small square, the whole cover */
+.np-art{width:48px;height:48px;flex:none;border-radius:8px;background:var(--staff) center/cover no-repeat;border:1px solid var(--line)}

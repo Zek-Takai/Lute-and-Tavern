@@ -152,6 +152,7 @@ fn base(v: &Value, kind: &str) -> RemoteItem {
         duration: v["duration"].as_f64(),
         track: v["track"].as_i64(),
         count: v["songCount"].as_i64(),
+        added: v["created"].as_str().and_then(crate::remote::iso_time),
     }
 }
 fn song(v: &Value) -> RemoteItem {

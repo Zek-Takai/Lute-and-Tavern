@@ -72,13 +72,14 @@ impl Library {
                 keep.insert(pid.clone());
                 let cover = it.cover.as_ref().and_then(|c| art.get(c)).cloned();
                 let existed: bool = tx.query_row("SELECT COUNT(*) FROM songs WHERE provider = 'remote' AND provider_id = ?1", [&pid], |r| r.get::<_, i64>(0))? > 0;
+                // Added = when the server got the song (unknown → oldest), so server songs never bury new local ones.
                 tx.execute(
                     "INSERT INTO songs(source, provider, provider_id, title, artist, album, year, genre, track, duration, art, added_at, updated_at) \
-                     VALUES ('library', 'remote', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10) \
+                     VALUES ('library', 'remote', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?11, ?10) \
                      ON CONFLICT(provider, provider_id) WHERE provider_id IS NOT NULL DO UPDATE SET title = excluded.title, artist = excluded.artist, \
                      album = excluded.album, year = excluded.year, genre = excluded.genre, track = excluded.track, duration = excluded.duration, \
-                     art = COALESCE(excluded.art, songs.art)",
-                    params![pid, it.name, it.artist, it.album, it.year, genres[&it.genre], it.track, it.duration, cover, t],
+                     art = COALESCE(excluded.art, songs.art), added_at = excluded.added_at",
+                    params![pid, it.name, it.artist, it.album, it.year, genres[&it.genre], it.track, it.duration, cover, t, it.added.unwrap_or(0)],
                 )?;
                 if existed { report.updated += 1 } else { report.added += 1 }
             }

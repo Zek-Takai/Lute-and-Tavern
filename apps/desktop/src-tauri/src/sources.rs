@@ -157,7 +157,9 @@ struct SyncEvent {
 /// Reads every song on the server, fetches covers not stored yet, and makes My music match. Unless `force`,
 /// it first asks the server whether anything changed since the last sync, and stops there if not.
 fn sync_library(lib: &lt_core::Library, id: i64, force: bool, progress: &dyn Fn(String)) -> anyhow::Result<Option<lt_core::remote_library::LibrarySync>> {
-    let last = lib.connection(id)?.extra["libraryStamp"].as_str().map(String::from);
+    let conn = lib.connection(id)?;
+    // A stamp only counts if the last sync used the current way of storing songs.
+    let last = (conn.extra["syncFormat"].as_i64() == Some(SYNC_FORMAT)).then(|| conn.extra["libraryStamp"].as_str().map(String::from)).flatten();
     with_conn(lib, id, |s| {
         let stamp = s.library_stamp().unwrap_or(None);
         if !force && stamp.is_some() && stamp == last {
@@ -212,11 +214,14 @@ fn sync_library(lib: &lt_core::Library, id: i64, force: bool, progress: &dyn Fn(
         if let Some(st) = stamp {
             lib.set_connection_extra(id, "libraryStamp", serde_json::Value::String(st))?;
         }
+        lib.set_connection_extra(id, "syncFormat", serde_json::Value::from(SYNC_FORMAT))?;
         Ok(Some(report))
     })
 }
 
 static SYNCING: Mutex<Vec<i64>> = Mutex::new(Vec::new());
+/// Bumped when synced songs are stored differently, so the next launch re-reads once (2 = server dates).
+const SYNC_FORMAT: i64 = 2;
 
 /// Starts a background sync of a server into My music (one at a time per server). `force` re-reads even when
 /// the server says nothing changed (the Refresh button).

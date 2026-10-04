@@ -45,6 +45,8 @@ pub struct RemoteItem {
     pub duration: Option<f64>,
     pub track: Option<i64>,
     pub count: Option<i64>,
+    /// When the song was added on the server (Unix seconds), if it says
+    pub added: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -238,6 +240,24 @@ pub(crate) fn list(v: &Value, f: impl Fn(&Value) -> RemoteItem) -> Vec<RemoteIte
     }
 }
 
+/// "2026-09-29T09:12:33.000Z" (or a date with an offset) → Unix seconds, read as UTC.
+pub(crate) fn iso_time(s: &str) -> Option<i64> {
+    let b = s.as_bytes();
+    if b.len() < 19 || b[4] != b'-' || b[7] != b'-' {
+        return None;
+    }
+    let n = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
+    let (y, m, d, hh, mm, ss) = (n(0..4)?, n(5..7)?, n(8..10)?, n(11..13)?, n(14..16)?, n(17..19)?);
+    // days from civil (Howard Hinnant)
+    let y2 = if m <= 2 { y - 1 } else { y };
+    let era = y2.div_euclid(400);
+    let yoe = y2 - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    Some(days * 86400 + hh * 3600 + mm * 60 + ss)
+}
+
 pub(crate) fn text(v: &Value, k: &str) -> String {
     match &v[k] {
         Value::String(s) => s.clone(),
@@ -249,6 +269,13 @@ pub(crate) fn text(v: &Value, k: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn server_dates_read_as_utc() {
+        assert_eq!(iso_time("1970-01-02T00:00:00Z"), Some(86400));
+        assert_eq!(iso_time("2026-09-29T09:12:33.000Z"), Some(1790673153));
+        assert_eq!(iso_time("nope"), None);
+    }
 
     #[test]
     fn addresses_are_normalized() {
