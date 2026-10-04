@@ -29,7 +29,14 @@ import { activeTab, cur, initSong, refreshSong } from './ui/song';
 import { $, toast } from './util';
 import { startVisualizer } from './visualizer';
 
+/** Where each page (All music, a playlist, an album…) was scrolled to: coming back to one keeps the place. */
+const pageScroll = new Map<string, number>();
+let pageShown = '';
+const pageKey = () => JSON.stringify([state.view, state.genre, state.filter]);
+
 function renderAll() {
+  const col = $('#mainCol');
+  if (pageShown) pageScroll.set(pageShown, col.scrollTop);
   if (!isExternalView(state.view)) state.lastLibraryView = state.view;
   syncSearchSource();
   refreshQueue();
@@ -38,6 +45,10 @@ function renderAll() {
   renderChips();
   renderGrid();
   $('#writerName').textContent = writerName();
+  const key = pageKey();
+  // the same page redrawn (a song changed, a playlist picked in the side panel…) keeps its place too
+  col.scrollTop = pageScroll.get(key) ?? 0;
+  pageShown = key;
 }
 
 async function openRequest() {

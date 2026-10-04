@@ -41,7 +41,17 @@ let panelLoaded = false;
 let sideQuery = '';
 
 /** The icon rail (Library, Playlists, Genres, Settings) and the searchable panel beside it. */
+/** Where each side tab's list was scrolled to, so redrawing (or coming back to a tab) keeps the place. */
+const sideScroll: Partial<Record<SideTab, number>> = {};
+let sideShown: SideTab | null = null;
+function restoreSideScroll() {
+  const list = document.getElementById('sideList');
+  if (list && sideShown) list.scrollTop = sideScroll[sideShown] ?? 0;
+}
+
 export function renderSide() {
+  const prevList = document.getElementById('sideList');
+  if (prevList && sideShown) sideScroll[sideShown] = prevList.scrollTop;
   const tabs: SideTab[] = ['library', 'albums', 'playlists', 'genres', 'apple', 'radio', 'servers'];
   $('#rail').innerHTML =
     tabs.map((k) => `<button class="rail-btn" data-st="${k}" aria-pressed="${panelOpen && state.sideTab === k}" title="${TAB_NAME[k]}" aria-label="${TAB_NAME[k]}">${ICONS[k]}</button>`).join('') +
@@ -79,13 +89,19 @@ export function renderSide() {
   if (state.sideTab === 'apple') {
     rows = '<p class="muted small side-empty">Loading…</p>';
     void applePanel().then((html) => {
-      if (state.sideTab === 'apple' && document.getElementById('sideList')) $('#sideList').innerHTML = html;
+      if (state.sideTab === 'apple' && document.getElementById('sideList')) {
+        $('#sideList').innerHTML = html;
+        restoreSideScroll();
+      }
     });
   }
   if (state.sideTab === 'radio') {
     rows = '<p class="muted small side-empty">Loading…</p>';
     void radioPanel().then((html) => {
-      if (state.sideTab === 'radio' && document.getElementById('sideList')) $('#sideList').innerHTML = html;
+      if (state.sideTab === 'radio' && document.getElementById('sideList')) {
+        $('#sideList').innerHTML = html;
+        restoreSideScroll();
+      }
     });
   }
   if (state.sideTab === 'servers') rows = serversPanel();
@@ -93,7 +109,11 @@ export function renderSide() {
   $('#side').innerHTML = `<header class="side-head"><h2>${TAB_NAME[state.sideTab]}</h2>${add}</header>
     <input class="inline-input side-find" id="sideFind" type="search" placeholder="Find ${TAB_NAME[state.sideTab].toLowerCase()}…" value="${esc(sideQuery)}" aria-label="Find in ${TAB_NAME[state.sideTab]}">
     <section class="side-list" id="sideList">${rows}</section>`;
+  sideShown = state.sideTab;
   filterSide();
+  restoreSideScroll();
+  // keep the place as it's scrolled, for when the tab is left and come back to
+  $('#sideList').addEventListener('scroll', (e) => { if (sideShown) sideScroll[sideShown] = (e.target as HTMLElement).scrollTop; }, { passive: true });
   $('#genreList').innerHTML = state.genres.map((g) => `<option value="${esc(g.name)}">`).join('');
 }
 

@@ -218,3 +218,21 @@ body .player[data-skin="minimal"]:hover,body .player[data-skin="minimal"]:focus-
 .player[data-skin="minimal"]:hover .scrub .track{height:4px}
 @media (prefers-reduced-motion:reduce){body .player[data-skin="minimal"],.player[data-skin="minimal"] .play{transition:none}}
 code.uid{font-size:12px;letter-spacing:.02em;user-select:all;word-break:break-all}
+
+/* Each part scrolls on its own: the music, the side panel and the rail never move each other, and reaching
+   the end of one doesn't carry on into another. The page itself doesn't scroll. */
+html,body{height:100%;overflow:hidden}
+body{padding-block:0}
+.wrap{height:100vh;display:flex;flex-direction:column}
+.wrap>.top{flex:none}
+.wrap>.layout{flex:1;min-height:0;align-items:stretch;padding-bottom:calc(84px + env(safe-area-inset-bottom,0px))}
+.layout>.rail{position:static;height:auto;max-height:none;overflow-y:auto;overscroll-behavior:contain}
+.layout>.side{position:static;height:auto;max-height:none;min-height:0;overscroll-behavior:contain}
+.side .side-list{overscroll-behavior:contain}
+.main-col{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-right:4px;padding-bottom:24px}
+.wrap>.layout{grid-template-rows:minmax(0,1fr)}
+@media (max-width:820px){
+  .wrap>.layout{grid-template-rows:auto auto minmax(0,1fr)}
+  .wrap>.layout.panel-closed{grid-template-rows:auto minmax(0,1fr)}
+  .layout>.side{max-height:35vh}
+}
