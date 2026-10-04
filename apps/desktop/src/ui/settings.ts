@@ -1,7 +1,7 @@
 // Settings: the songwriter connection, music folders, genre tags and the sidebar's starting tab.
 import { audioDir, join } from '@tauri-apps/api/path';
 import { message, open as pickFolder } from '@tauri-apps/plugin-dialog';
-import { api, errText, type McpInfo, type PlexServer, type SpeechSettings, type UpdateInfo } from '../api';
+import { api, errText, type McpInfo, type PlexServer, type SpeechSettings, type SyncSettings, type UpdateInfo } from '../api';
 import { comboOf, DEFAULT_KEYS, keyLabel } from './assistant';
 import { connections, loadConnections } from './sources';
 import { applyLineColor, applySkin, LINE_COLORS, SKINS } from '../player';
@@ -39,6 +39,7 @@ const KIND_HELP: Record<string, string> = {
   webdav: 'A music folder shared over WebDAV, played as it is. Folders in the Lute & Tavern layout show their artists and albums.',
 };
 let addKind = 'plex';
+let syncCfg: SyncSettings = { kind: 'none', address: 'http://127.0.0.1:8384', command: '', hasKey: false };
 let mcp: McpInfo = { enabled: false, running: false, url: '', error: null };
 let apple: AppleStatus = { ready: false, builtIn: false, keyId: '', teamId: '' };
 
@@ -93,6 +94,7 @@ export async function openSettings(section?: 'writer' | 'servers') {
   updates = await api.updateInfo();
   mcp = await api.mcpInfo().catch(() => mcp);
   speech = await api.speechSettings().catch(() => speech);
+  syncCfg = await api.syncSettings().catch(() => syncCfg);
   apple = await appleStatus().catch(() => apple);
   if (apple.ready) await musicKit().catch(() => {});
   render();
@@ -205,6 +207,29 @@ function render() {
       <div class="form"><label>Address</label><input readonly value="${esc(mcp.url)}"></div>
       <div class="row"><button class="btn small" id="mcpCopyUrl">Copy address</button><button class="btn small" id="mcpCopyToken">Copy token</button><button class="btn small" id="mcpCopyCfg">Copy setup for your AI app</button><button class="btn small" id="mcpNew">New token</button></div>
       <p class="muted small">The token is kept in your system keychain. Give it only to apps you trust; New token cuts off every app using the old one.</p>` : ''}
+    </section>
+
+    <section class="set-sec" id="setSync">
+      <h3>Sync</h3>
+      <p class="muted small">Keep your library in step with your other devices using the sync app you already use. Lute &amp; Tavern never installs or updates one; it keeps its folder tidy, leaves the sync app's files alone, and can tell your sync app when something changed. Point your sync app at ${libraryFolder() ? `<b>${esc(libraryFolder()!.path)}</b>` : 'your library folder (choose one below first)'}.</p>
+      <fieldset class="choice">
+        <legend>How you sync</legend>
+        ${([
+          ['none', 'I don\'t sync this library'],
+          ['folder', 'My sync app watches the folder by itself (Dropbox, iCloud Drive, OneDrive, Nextcloud, Resilio, Synology Drive…)'],
+          ['syncthing', 'Syncthing (the app tells it right away when something changes)'],
+          ['command', 'Run a command after changes (rclone, unison, your own script…)'],
+        ] as const).map(([v, l]) => `<label><input type="radio" name="syncKind" value="${v}" ${syncCfg.kind === v ? 'checked' : ''}> ${l}</label>`).join('')}
+      </fieldset>
+      ${syncCfg.kind === 'syncthing' ? `<div class="form">
+        <label for="syAddr">Address</label><input id="syAddr" value="${esc(syncCfg.address)}" placeholder="http://127.0.0.1:8384">
+        <label for="syKey">API key</label><input id="syKey" type="password" autocomplete="off" placeholder="${syncCfg.hasKey ? 'Saved in your keychain. Type to replace it.' : 'In Syncthing: Actions › Settings › General › API Key'}">
+      </div>` : ''}
+      ${syncCfg.kind === 'command' ? `<div class="form">
+        <label for="syCmd">Command</label><textarea id="syCmd" rows="2" placeholder="rclone bisync &quot;$LT_LIBRARY&quot; nas:Music --resilient">${esc(syncCfg.command)}</textarea>
+      </div><p class="muted small">Runs in your shell up to 30 seconds after the library changes (one run for a burst of changes). <code>$LT_LIBRARY</code> is the library folder and <code>$LT_CHANGED</code> lists the changed files, one per line.</p>` : ''}
+      <div class="row"><button class="btn primary" id="sySave">Save</button>${syncCfg.kind !== 'none' ? '<button class="btn" id="syNow">Sync now</button><button class="btn" id="syCheck">Check</button>' : ''}<span class="muted small" id="syStatus"></span></div>
+      <div id="syReport"></div>
     </section>
 
     <section class="set-sec" id="setServers">
@@ -446,6 +471,50 @@ function render() {
     render();
     toast('Key removed from your keychain');
   });
+  const syStatus = (t: string) => ($('#syStatus').textContent = t);
+  const showSyncReport = async () => {
+    const r = await api.syncStatus().catch((e) => ({ status: null, error: errText(e), lastRun: null, conflicts: [] }));
+    const run = r.lastRun;
+    $('#syReport').innerHTML =
+      (r.status ? `<p class="small">${esc(r.status.summary)}</p>` : '') +
+      (r.error ? `<p class="small" style="color:var(--danger, #c44)">${esc(r.error)}</p>` : '') +
+      (run ? `<p class="small muted">Last run ${new Date(run.at * 1000).toLocaleString()}: ${run.ok ? 'finished' : `failed${run.code != null ? ` (code ${run.code})` : ''}`}</p>${run.output ? `<pre class="small">${esc(run.output)}</pre>` : ''}` : '') +
+      (r.conflicts.length
+        ? `<p class="small"><b>${r.conflicts.length} conflict cop${r.conflicts.length === 1 ? 'y' : 'ies'}</b> from your sync app. They're not added as songs; open each, keep the one you want and delete the other.</p>
+           <ul class="set-list">${r.conflicts.map((c) => `<li><span class="path">${esc(c.path)}</span><span class="muted small">${esc(c.by)}${c.original ? '' : ', original missing'}</span><button class="btn small" data-reveal="${esc(c.path)}">Show</button></li>`).join('')}</ul>`
+        : '');
+    $('#syReport').querySelectorAll<HTMLElement>('[data-reveal]').forEach((b) => (b.onclick = () => void api.syncReveal(b.dataset.reveal!).catch((e) => toast(errText(e)))));
+  };
+  document.querySelectorAll<HTMLInputElement>('input[name=syncKind]').forEach((r) => (r.onchange = () => {
+    syncCfg = { ...syncCfg, kind: r.value as SyncSettings['kind'] };
+    render();
+    $('#setSync')?.scrollIntoView({ block: 'nearest' });
+  }));
+  $('#sySave').onclick = async () => {
+    const addr = (document.getElementById('syAddr') as HTMLInputElement | null)?.value ?? syncCfg.address;
+    const cmd = (document.getElementById('syCmd') as HTMLTextAreaElement | null)?.value ?? syncCfg.command;
+    const k = (document.getElementById('syKey') as HTMLInputElement | null)?.value || null;
+    try {
+      await api.setSyncSettings(syncCfg.kind, addr, cmd, k);
+      syncCfg = await api.syncSettings();
+      render();
+      toast('Sync saved');
+      if (syncCfg.kind !== 'none') await showSyncReport();
+    } catch (e) {
+      syStatus(errText(e));
+    }
+  };
+  document.getElementById('syNow')?.addEventListener('click', async () => {
+    syStatus('Working…');
+    try {
+      syStatus(await api.syncNow());
+    } catch (e) {
+      syStatus(errText(e));
+    }
+    await showSyncReport();
+  });
+  document.getElementById('syCheck')?.addEventListener('click', () => void showSyncReport());
+  if (syncCfg.kind !== 'none') void showSyncReport();
   $<HTMLSelectElement>('#cKind').onchange = (e) => {
     addKind = (e.target as HTMLSelectElement).value;
     render();

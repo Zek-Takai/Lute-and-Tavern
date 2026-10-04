@@ -9,6 +9,8 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tauri::Manager;
 
+static RESCAN_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[derive(Default)]
 pub struct Watcher(Mutex<Option<Debouncer<RecommendedWatcher>>>);
 
@@ -24,14 +26,31 @@ impl Watcher {
             // The library folder is organized as a whole: new files get moved into song folders first.
             if let Ok(Some(lib_folder)) = lib.library_folder() {
                 let root = Path::new(&lib_folder.path);
-                if events.iter().any(|e| e.path.starts_with(root))
-                    && let Ok(r) = lib.scan_folder(&lib_folder) {
+                let inside: Vec<std::path::PathBuf> = events.iter().filter(|e| e.path.starts_with(root)).map(|e| e.path.clone()).collect();
+                if !inside.is_empty() {
+                    if let Ok(r) = lib.scan_folder(&lib_folder) {
                         changed |= r.added + r.updated + r.removed > 0;
                     }
+                    // Files still arriving (a download, a sync app) are left until they settle; look again shortly.
+                    let later = handle.clone();
+                    let folder = lib_folder.clone();
+                    // One follow-up at a time, however many changes arrive meanwhile.
+                    if !RESCAN_PENDING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_secs(20));
+                        RESCAN_PENDING.store(false, std::sync::atomic::Ordering::SeqCst);
+                        let state = later.state::<AppState>();
+                        if state.lib.scan_folder(&folder).is_ok_and(|r| r.added + r.updated + r.removed > 0) {
+                            crate::emit_library_changed(&later);
+                        }
+                    });
+                    }
+                    crate::sync::changed(&handle, inside);
+                }
             }
             for ev in events {
                 let path = ev.path.as_path();
-                if path.is_dir() || !lt_core::tags::is_audio(path) {
+                if path.is_dir() || !lt_core::tags::is_audio(path) || lt_core::sync::conflict_of(path).is_some() {
                     continue;
                 }
                 if lib.folder_for(path).ok().flatten().is_some_and(|f| f.managed) {

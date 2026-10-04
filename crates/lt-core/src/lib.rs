@@ -16,6 +16,7 @@ pub mod remote_plex;
 pub mod remote_subsonic;
 pub mod remote_webdav;
 pub mod songwriter;
+pub mod sync;
 pub mod tags;
 
 pub use library::{Draft, Library, Song, SongDetail, SongPatch};

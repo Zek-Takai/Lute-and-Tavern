@@ -49,6 +49,13 @@ export interface Connection { id: number; kind: string; name: string; baseUrl: s
 export interface RemoteItem { id: string; kind: 'song' | 'album' | 'artist' | 'playlist' | 'folder'; name: string; artist: string; album: string; year: string; genre: string; cover: string | null; duration: number | null; track: number | null; count: number | null; art: string | null }
 export interface RemoteResults { songs: RemoteItem[]; albums: RemoteItem[]; artists: RemoteItem[]; playlists: RemoteItem[]; folders: RemoteItem[] }
 export interface PlexServer { name: string; machine: string; uris: string[]; owned: boolean }
+export interface SyncSettings { kind: 'none' | 'folder' | 'syncthing' | 'command'; address: string; command: string; hasKey: boolean }
+export interface SyncReport {
+  status: { state: string; summary: string } | null;
+  error: string | null;
+  lastRun: { ok: boolean; code: number | null; output: string; at: number } | null;
+  conflicts: { path: string; original: string | null; by: string }[];
+}
 export interface McpInfo { enabled: boolean; running: boolean; url: string; error: string | null }
 export interface Take { id: number; name: string; origin: string; addedAt: number; versionId: number | null }
 export interface Version { id: number; label: string; note: string; createdAt: number }
@@ -111,6 +118,11 @@ export const api = {
   updateInfo: () => invoke<UpdateInfo>('update_info'),
   mcpInfo: () => invoke<McpInfo>('mcp_info'),
   relayBase: () => invoke<string>('relay_base'),
+  syncSettings: () => invoke<SyncSettings>('sync_settings'),
+  setSyncSettings: (kind: string, address: string, command: string, apiKey: string | null) => invoke<void>('set_sync_settings', { kind, address, command, apiKey }),
+  syncStatus: () => invoke<SyncReport>('sync_status'),
+  syncNow: () => invoke<string>('sync_now'),
+  syncReveal: (path: string) => invoke<void>('sync_reveal', { path }),
   radioSearch: (name: string, tag = '', country = '', limit = 60) => invoke<Station[]>('radio_search', { name, tag, country, limit }),
   radioHome: () => invoke<RadioHome>('radio_home'),
   radioFavorite: (station: Station, on: boolean) => invoke<void>('radio_favorite', { station, on }),

@@ -7,6 +7,7 @@ mod musickit;
 mod protocol;
 mod relay;
 mod sources;
+mod sync;
 mod secure;
 mod updates;
 mod watch;
@@ -404,6 +405,7 @@ pub fn run() {
         .manage(musickit::TokenCache::default())
         .manage(mcp::Running::default())
         .manage(assistant::PendingAsk::default())
+        .manage(sync::Hook::default())
         .register_asynchronous_uri_scheme_protocol("lt", protocol::handle)
         .setup(|app| {
             main_window(app)?;
@@ -515,6 +517,11 @@ pub fn run() {
             sources::plex_login_start,
             sources::plex_login_check,
             sources::plex_connect,
+            sync::sync_settings,
+            sync::set_sync_settings,
+            sync::sync_status,
+            sync::sync_now,
+            sync::sync_reveal,
             sources::remote_search,
             sources::remote_home,
             sources::remote_open,

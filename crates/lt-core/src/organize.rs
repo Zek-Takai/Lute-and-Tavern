@@ -275,6 +275,7 @@ impl Library {
                 !rel.iter()
                     .any(|c| c.to_str().is_some_and(|s| s.starts_with('.')))
                     && place_of(&root, p) == Place::Loose
+                    && crate::sync::conflict_of(p).is_none()
                     && (!wait_for_writes || settled(p))
             })
             .collect();

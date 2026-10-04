@@ -619,6 +619,7 @@ impl Library {
                 e.file_type().is_file()
                     && tags::is_audio(e.path())
                     && !is_hidden(e.path().strip_prefix(&root).unwrap_or(e.path()))
+                    && crate::sync::conflict_of(e.path()).is_none()
             })
             .filter(|e| {
                 !folder.managed
