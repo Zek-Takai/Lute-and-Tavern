@@ -125,20 +125,47 @@ export async function openSettings(section?: 'writer' | 'servers') {
     });
   }
   if (!d.open) d.showModal();
-  if (section === 'writer') $('#wUrl')?.focus();
+  if (section === 'writer') {
+    showTab('ai');
+    $('#wUrl')?.focus();
+  }
   if (section === 'servers') {
+    showTab('services');
     $('#setServers')?.scrollIntoView({ block: 'start' });
     $('#cName')?.focus();
   }
+}
+
+/** Settings tabs, in order. */
+const TABS = [['general', 'General'], ['library', 'Library'], ['services', 'Music services'], ['sync', 'Sync & backup'], ['ai', 'AI']] as const;
+type Tab = (typeof TABS)[number][0];
+let tab: Tab = 'general';
+
+/** Shows one tab's sections (all of them stay in the page, so their controls keep working). */
+function showTab(t: Tab, focus = false) {
+  tab = t;
+  let first = true;
+  document.querySelectorAll<HTMLElement>('#setBody [data-tab]').forEach((sec) => {
+    sec.hidden = sec.dataset.tab !== t;
+    sec.classList.toggle('first', !sec.hidden && first);
+    if (!sec.hidden) first = false;
+  });
+  document.querySelectorAll<HTMLButtonElement>('#setBody [data-set-tab]').forEach((b) => {
+    const on = b.dataset.setTab === t;
+    b.setAttribute('aria-selected', String(on));
+    b.tabIndex = on ? 0 : -1;
+    if (on && focus) b.focus();
+  });
 }
 
 function render() {
   const w = state.writer;
   const side = (state.settings.sidebarDefault as string) || 'library';
   $('#setBody').innerHTML = `
-    <div class="row set-top"><h2 id="setTitle">Settings</h2><button class="btn" id="setClose">Done</button></div>
+    <div class="set-top"><div class="row"><h2 id="setTitle">Settings</h2><button class="btn" id="setClose">Done</button></div>
+      <div class="set-tabs" role="tablist" aria-label="Settings sections">${TABS.map(([k, l]) => `<button role="tab" id="tab-${k}" data-set-tab="${k}" aria-selected="${tab === k}" tabindex="${tab === k ? 0 : -1}">${l}</button>`).join('')}</div></div>
 
-    <section class="set-sec">
+    <section class="set-sec" data-tab="ai">
       <h3>Your AI</h3>
       <p class="muted small">Writes your songs and runs the assistant. Any AI that speaks the OpenAI chat format works: a model on your own computer or network (LM Studio, Ollama, vLLM) or a hosted service. For the assistant, pick a model that supports tool calling. Your key is kept in the system keychain.</p>
       <div class="form">
@@ -152,7 +179,7 @@ function render() {
       <div class="row"><button class="btn" id="wCheck">Check connection</button><button class="btn primary" id="wSave">Save songwriter</button>${w.hasKey ? '<button class="btn small" id="wForget">Remove saved key</button>' : ''}<span class="muted small" id="wStatus"></span></div>
     </section>
 
-    <section class="set-sec">
+    <section class="set-sec" data-tab="ai">
       <h3>Assistant</h3>
       <p class="muted small">A chat with your AI that can run the app for you: find and play music, build playlists to your taste, tidy genres and song details, write songs. Open it with the Assistant button or your shortcut. Click a shortcut, then press the keys you want.</p>
       <div class="form">
@@ -162,7 +189,7 @@ function render() {
       <p class="muted small">Other apps and voice assistants can ask it too, and open Lute &amp; Tavern if it is closed, with a link such as <code>luteandtavern://ask?text=play my road trip playlist</code> (for example from Apple Shortcuts or Siri).</p>
     </section>
 
-    <section class="set-sec">
+    <section class="set-sec" data-tab="ai">
       <h3>Voice</h3>
       <p class="muted small">To talk instead of type, point this at a Whisper speech-to-text server: one on your own computer (faster-whisper-server, Speaches, whisper.cpp's server and others) or a hosted one (OpenAI, Groq). Anything that answers the Whisper transcription API works. The key is kept in the system keychain.</p>
       <div class="form">
@@ -174,7 +201,7 @@ function render() {
       <div class="row"><button class="btn primary" id="vSave">Save voice</button>${speech.hasKey ? '<button class="btn small" id="vForget">Remove saved key</button>' : ''}<span class="muted small" id="vStatus"></span></div>
     </section>
 
-    <section class="set-sec">
+    <section class="set-sec" data-tab="library">
       <h3>Library folder</h3>
       <p class="muted small">Songs you add go here and get sorted: each song gets its own folder with its stems, takes, sheet music, cover and a song.json of everything the app knows. Other artists' albums are kept together as Albums/Artist/Album.</p>
       ${libraryFolder()
@@ -182,14 +209,14 @@ function render() {
         : `<div class="row"><button class="btn primary" id="libSuggested">Use Music › Lute &amp; Tavern</button><button class="btn" id="libChoose">Choose a folder…</button></div>`}
     </section>
 
-    <section class="set-sec">
+    <section class="set-sec" data-tab="library">
       <h3>Other music folders</h3>
       <p class="muted small">Watched and played, never moved or renamed. Songs you add, change or delete in them update here on their own.</p>
       <ul class="set-list">${state.folders.filter((f) => !f.managed).map((f) => `<li><span class="path">${esc(f.path)}</span><button class="btn small" data-make-lib="${esc(f.path)}">Make this my library</button><button class="btn small" data-rm-folder="${f.id}">Stop watching</button></li>`).join('') || '<li class="muted">None.</li>'}</ul>
       <div class="row"><button class="btn" id="fAdd">Watch a music folder</button>${state.folders.length ? '<button class="btn" id="fScan">Check folders now</button>' : ''}</div>
     </section>
 
-    <section class="set-sec">
+    <section class="set-sec" data-tab="library">
       <h3>Genre tags</h3>
       <p class="muted small">Every song carries one tag. Rename a tag and all its songs follow; delete one and its songs go back to Unsorted.</p>
       <ul class="set-list tags-list">${state.genres
@@ -198,7 +225,7 @@ function render() {
       <form class="row" id="tagForm"><input class="inline-input" id="tagNew" placeholder="New tag, e.g. Sea Shanty" style="flex:1"><button class="btn">Add tag</button></form>
     </section>
 
-    <section class="set-sec">
+    <section class="set-sec" data-tab="services">
       <h3>Apple Music</h3>
       <p class="muted small">Play Apple Music inside Lute &amp; Tavern with your Apple Music subscription. Your Apple ID sign-in and every key stay in your Mac's Keychain, never in the app's files.</p>
       <ol class="steps small">
@@ -215,7 +242,7 @@ function render() {
       ${isConnected() ? `<div class="row"><button class="btn small" id="amPullNow">Bring them in now</button><span class="muted small" id="amPullStatus">${esc(applePullText())}</span></div>` : ''}
     </section>
 
-    <section class="set-sec">
+    <section class="set-sec" data-tab="library">
       <h3>Stems</h3>
       <p class="muted small">When you attach WAV stems, they can be stored as FLAC instead: exactly the same sound in about half the space. Keep WAV if you open stems in an app that can't read FLAC, such as Logic Pro or GarageBand.</p>
       <fieldset class="choice">
@@ -225,7 +252,7 @@ function render() {
       <div class="row"><button class="btn" id="flacAll">Convert WAV stems already in my library</button><span class="muted small" id="flacStatus"></span></div>
     </section>
 
-    <section class="set-sec">
+    <section class="set-sec" data-tab="ai">
       <h3>AI apps (MCP)</h3>
       <p class="muted small">Lets AI apps on this computer that support MCP (Claude, Hermes and others) write Suno songs straight into your library. They get a Suno songwriting guide and tools to list, create and revise written songs; turn on Full control to let them run the rest of the app too. Only works while Lute &amp; Tavern is open.</p>
       <label class="row"><input type="checkbox" id="mcpOn" ${mcp.enabled ? 'checked' : ''}> Let AI apps write songs here</label>
@@ -236,7 +263,7 @@ function render() {
       <p class="muted small">The token is kept in your system keychain. Give it only to apps you trust; New token cuts off every app using the old one.</p>` : ''}
     </section>
 
-    <section class="set-sec" id="setSync">
+    <section class="set-sec" data-tab="sync" id="setSync">
       <h3>Sync</h3>
       <p class="muted small">Keep your library in step with your other devices using the sync app you already use. Lute &amp; Tavern never installs or updates one; it keeps its folder tidy, leaves the sync app's files alone, and can tell your sync app when something changed. Point your sync app at ${libraryFolder() ? `<b>${esc(libraryFolder()!.path)}</b>` : 'your library folder (choose one below first)'}.</p>
       <fieldset class="choice">
@@ -259,7 +286,7 @@ function render() {
       <div id="syReport"></div>
     </section>
 
-    <section class="set-sec" id="setBackup">
+    <section class="set-sec" data-tab="sync" id="setBackup">
       <h3>Backup</h3>
       <p class="muted small">Copies your library folder to a server in the same layout, so new songs land in their place there. Only new, changed and moved files are sent; nothing on the server is ever deleted. It goes to a <b>WebDAV</b> connection (add one under Your music servers). For Nextcloud that's its Files address, <code>https://your-nextcloud/remote.php/dav/files/your-name</code>, which works alongside its Music server connection.</p>
       <div class="form">
@@ -275,7 +302,7 @@ function render() {
       <p class="muted small">${backupCfg.last ? `Last backup ${new Date(backupCfg.last * 1000).toLocaleString()}. ` : ''}${backupCfg.next && backupCfg.schedule.mode !== 'manual' && backupCfg.conn ? `Next ${new Date(backupCfg.next * 1000).toLocaleString()} (if the app is closed then, it runs when it next opens).` : ''}</p>
     </section>
 
-    <section class="set-sec" id="setServers">
+    <section class="set-sec" data-tab="services" id="setServers">
       <h3>Your music servers</h3>
       <p class="muted small">Play music you keep elsewhere: a server on a device you own (a NAS or home computer) or a cloud server you run. It's just an address, so it works at home, over the internet or through a VPN. Sign-ins are kept in the system keychain.</p>
       <ul class="set-list">${connections.map((c) => `<li class="conn-row"><span><b>${esc(c.name)}</b> <span class="muted small">${esc(KIND_NAME[c.kind]?.split(':')[0].split(' (')[0] ?? c.kind)}, ${esc(c.baseUrl)}</span>
@@ -299,7 +326,7 @@ function render() {
       <div class="row"><button class="btn primary" id="cAdd">Connect</button><span class="muted small" id="cStatus"></span></div>`}
     </section>
 
-    <section class="set-sec">
+    <section class="set-sec" data-tab="general">
       <h3>Updates</h3>
       <p class="muted small">Version ${esc(updates.currentVersion)}. ${updates.canUpdate
         ? 'When this is on, Lute &amp; Tavern checks for a new release each time it starts and asks before installing.'
@@ -309,7 +336,7 @@ function render() {
       <div class="row"><button class="btn" id="uCheck" ${updates.canUpdate ? '' : 'disabled'}>Check now</button><span class="muted small" id="uStatus"></span></div>
     </section>
 
-    <section class="set-sec">
+    <section class="set-sec" data-tab="general">
       <fieldset class="choice" id="setSkin">
         <legend>Player bar</legend>
         ${SKINS.map(([k, l, d]) => `<label><input type="radio" name="playerSkin" value="${k}" ${((state.settings.playerSkin as string) || 'classic') === k ? 'checked' : ''}> <span><b>${l}</b><br><span class="muted small">${d}</span></span></label>`).join('')}
@@ -318,7 +345,7 @@ function render() {
         <select id="lineColor" class="btn small">${LINE_COLORS.map(([k, l]) => `<option value="${k}" ${((state.settings.lineColor as string) || 'theme') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     </section>
 
-    <section class="set-sec">
+    <section class="set-sec" data-tab="general">
       <fieldset class="choice" id="setSide">
         <legend>Sidebar opens on</legend>
         ${[['library', 'Library'], ['albums', 'Albums'], ['playlists', 'Playlists'], ['genres', 'Genres']].map(([v, l]) => `<label><input type="radio" name="sideDefault" value="${v}" ${side === v ? 'checked' : ''}> ${l}</label>`).join('')}
@@ -326,6 +353,19 @@ function render() {
     </section>`;
 
   $('#setClose').onclick = () => $<HTMLDialogElement>('#set').close();
+  showTab(tab);
+  const tabs = $('#setBody .set-tabs');
+  tabs.onclick = (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-set-tab]');
+    if (b) showTab(b.dataset.setTab as Tab);
+  };
+  tabs.onkeydown = (e) => {
+    const i = TABS.findIndex(([k]) => k === tab);
+    const n = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : null;
+    if (n === null) return;
+    e.preventDefault();
+    showTab(TABS[(n + TABS.length) % TABS.length][0], true);
+  };
   const status = (t: string) => ($('#wStatus').textContent = t);
   $('#wCheck').onclick = async () => {
     status('Checking…');
