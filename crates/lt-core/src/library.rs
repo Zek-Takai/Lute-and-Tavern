@@ -457,6 +457,24 @@ impl Library {
         self.song(id)
     }
 
+    /// Files a song under the songwriter ("written with …") or back under the person's own music. A song
+    /// marked as written takes the songwriter's name as its artist, so it follows later renames.
+    pub fn set_song_written(&self, id: i64, written: bool, writer: &str) -> Result<Song> {
+        let n = if written {
+            self.db().execute(
+                "UPDATE songs SET source = 'ai', artist = ?2, status = COALESCE(status, 'ready'), updated_at = ?3 WHERE id = ?1 AND provider = 'local'",
+                params![id, writer.trim(), now()],
+            )?
+        } else {
+            self.db().execute("UPDATE songs SET source = 'library', updated_at = ?2 WHERE id = ?1", params![id, now()])?
+        };
+        if n == 0 {
+            bail!("Only songs in your own library can be marked as written by your songwriter.");
+        }
+        self.write_sidecar(id)?;
+        self.song(id)
+    }
+
     /// Copies an image into the art folder and attaches it to the song.
     /// Sets artwork from an image, or from the cover embedded in an audio file (e.g. Suno's MP3 download).
     pub fn set_art_from_file(&self, id: i64, src: &Path) -> Result<Song> {

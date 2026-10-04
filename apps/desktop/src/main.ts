@@ -22,6 +22,7 @@ import { addMusicFolder, addSongsToLibrary, checkForUpdatesAtStart, chooseLibrar
 import { initSheetKeys } from './ui/sheet';
 import { initApple, startApplePulls } from './ui/apple';
 import { initFade } from './ui/fade';
+import { initSongMenus } from './ui/songmenu';
 import { onAppleChange } from './apple';
 import { initSecureStorage } from './secureStorage';
 import { activeTab, cur, initSong, refreshSong } from './ui/song';
@@ -170,6 +171,7 @@ async function boot() {
   renderAll();
   restoreNowPlaying();
   initFade();
+  initSongMenus();
   startVisualizer($<HTMLCanvasElement>('#viz'));
   await initEvents();
   await initDragDrop();

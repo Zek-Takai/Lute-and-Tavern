@@ -24,6 +24,66 @@ export let queue: Song[] = [];
 export let qi = -1;
 let queueFrom = '';
 export let repeat: Repeat = 'off';
+/** Shuffle: the list plays in a random order; turning it off goes back to the list's own order. */
+export let shuffle = false;
+let unshuffled: Song[] | null = null;
+
+function shuffled<T>(a: T[]): T[] {
+  const b = a.slice();
+  for (let i = b.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [b[i], b[j]] = [b[j], b[i]];
+  }
+  return b;
+}
+
+/** Puts the current song first and the rest in a random order (or back in order). */
+function reorder() {
+  if (shuffle) {
+    unshuffled = queue.slice();
+    const cur = qi >= 0 ? queue[qi] : undefined;
+    queue = cur ? [cur, ...shuffled(queue.filter((_, i) => i !== qi))] : shuffled(queue);
+    qi = cur ? 0 : -1;
+  } else if (unshuffled) {
+    const cur = qi >= 0 ? queue[qi] : undefined;
+    // songs added while shuffled stay, after the original list
+    queue = [...unshuffled.filter((s) => queue.includes(s)), ...queue.filter((s) => !unshuffled!.includes(s))];
+    qi = cur ? queue.indexOf(cur) : -1;
+    unshuffled = null;
+  }
+}
+
+export function setShuffle(on: boolean) {
+  if (shuffle === on) return;
+  shuffle = on;
+  void saveSetting('shuffle', on);
+  reorder();
+  syncShuffle();
+  renderQueue();
+  saveNowPlaying();
+}
+
+/** Plays a list in a random order from a random song (a playlist, a genre, or the whole library). */
+export function playShuffled(list: Song[]) {
+  const l = list.filter(playable);
+  if (!l.length) return toast('Nothing here can be played.');
+  shuffle = true;
+  void saveSetting('shuffle', true);
+  syncShuffle();
+  stop();
+  playSong(l[Math.floor(Math.random() * l.length)], l);
+}
+
+function syncShuffle() {
+  const b = document.getElementById('sMode');
+  if (!b) return;
+  b.innerHTML = SHUFFLE_ICON;
+  b.setAttribute('aria-pressed', String(shuffle));
+  const label = shuffle ? 'Shuffle is on' : 'Shuffle is off';
+  b.setAttribute('aria-label', label);
+  b.title = label;
+}
+const SHUFFLE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="m15 15 6 6"/><path d="M4 4l5 5"/></svg>';
 /** Paused keeps the song and its place; Stop clears the place. */
 export let paused = false;
 /** Where the next start of the current song begins (a restored position after relaunch). */
@@ -186,6 +246,8 @@ export function playSong(s: Song, list?: Song[]) {
     queue = list.filter(playable);
     qi = queue.findIndex((x) => x.id === s.id);
     queueFrom = viewName();
+    unshuffled = null;
+    if (shuffle) reorder();
   }
   if (playing && playing.id === String(s.id)) return togglePause();
   const startAt = nowSong?.id === s.id ? resumeAt : 0;
@@ -499,6 +561,12 @@ function syncRepeat() {
 export function initPlayer() {
   repeat = setting<Repeat>('repeat', 'off');
   syncRepeat();
+  shuffle = setting<boolean>('shuffle', false);
+  syncShuffle();
+  $('#sMode').onclick = () => {
+    setShuffle(!shuffle);
+    toast(shuffle ? 'Shuffle is on' : 'Shuffle is off: back to the list order');
+  };
   applySkin(setting<string>('playerSkin', 'classic'));
   applyLineColor(setting<string>('lineColor', 'theme'));
   $('#pBtn').innerHTML = PLAY;

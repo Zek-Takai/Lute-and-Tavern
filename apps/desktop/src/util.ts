@@ -36,34 +36,70 @@ export async function copyText(text: string, label: string) {
   }
 }
 
-/** A small right-click menu at the pointer. Closes on the next click, scroll or Escape. */
-export function contextMenu(e: MouseEvent, items: [string, () => void][]) {
+/** A menu entry: a label and what it does, a label and a sub-menu, or null for a divider. */
+export type MenuItem = [string, () => void] | [string, MenuItem[]] | null;
+
+/** A small right-click menu at the pointer. Closes on the next click, scroll or Escape. An entry with a
+ *  sub-menu (shown with ›) opens it in place, with a way back. */
+export function contextMenu(e: MouseEvent, items: MenuItem[]) {
   e.preventDefault();
   document.querySelector('.ctx')?.remove();
   const m = document.createElement('div');
   m.className = 'ctx';
   m.setAttribute('role', 'menu');
-  items.forEach(([label, fn]) => {
-    const b = document.createElement('button');
-    b.setAttribute('role', 'menuitem');
-    b.textContent = label;
-    b.onclick = () => { close(); fn(); };
-    m.append(b);
-  });
+  const show = (list: MenuItem[], back?: MenuItem[]) => {
+    m.replaceChildren();
+    if (back) list = [['‹ Back', () => show(back)], null, ...list];
+    for (const it of list) {
+      if (!it) {
+        const hr = document.createElement('div');
+        hr.className = 'sep';
+        hr.setAttribute('role', 'separator');
+        m.append(hr);
+        continue;
+      }
+      const [label, act] = it;
+      const b = document.createElement('button');
+      b.setAttribute('role', 'menuitem');
+      b.textContent = Array.isArray(act) ? `${label} ›` : label;
+      if (Array.isArray(act)) b.setAttribute('aria-haspopup', 'menu');
+      b.onclick = () => {
+        if (Array.isArray(act)) return show(act, list === items ? items : undefined);
+        if (label === '‹ Back') return act();
+        close();
+        act();
+      };
+      m.append(b);
+    }
+    place();
+    m.querySelector('button')?.focus();
+  };
+  const place = () => {
+    const x = Math.min(e.clientX, innerWidth - m.offsetWidth - 8), y = Math.min(e.clientY, innerHeight - m.offsetHeight - 8);
+    m.style.left = `${Math.max(8, x)}px`;
+    m.style.top = `${Math.max(8, y)}px`;
+  };
   document.body.append(m);
-  const x = Math.min(e.clientX, innerWidth - m.offsetWidth - 8), y = Math.min(e.clientY, innerHeight - m.offsetHeight - 8);
-  m.style.left = `${Math.max(8, x)}px`;
-  m.style.top = `${Math.max(8, y)}px`;
-  m.querySelector('button')?.focus();
+  show(items);
   const away = (ev: Event) => { if (!(ev.target instanceof Node && m.contains(ev.target))) close(); };
-  const key = (ev: KeyboardEvent) => { if (ev.key === 'Escape') close(); };
+  const key = (ev: KeyboardEvent) => {
+    if (ev.key === 'Escape') close();
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      const bs = [...m.querySelectorAll('button')];
+      const i = bs.indexOf(document.activeElement as HTMLButtonElement);
+      bs[(i + (ev.key === 'ArrowDown' ? 1 : -1) + bs.length) % bs.length]?.focus();
+    }
+  };
+  // the page scrolling closes it; scrolling a long menu itself doesn't
+  const scrolled = (ev: Event) => { if (!(ev.target instanceof Node && m.contains(ev.target))) close(); };
   function close() {
     m.remove();
     document.removeEventListener('mousedown', away, true);
     document.removeEventListener('keydown', key, true);
-    document.removeEventListener('scroll', close, true);
+    document.removeEventListener('scroll', scrolled, true);
   }
   document.addEventListener('mousedown', away, true);
   document.addEventListener('keydown', key, true);
-  document.addEventListener('scroll', close, true);
+  document.addEventListener('scroll', scrolled, true);
 }

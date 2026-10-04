@@ -2,7 +2,7 @@
 import { api, errText, lt, type Song } from '../api';
 import { ask, message, open as pickFiles } from '@tauri-apps/plugin-dialog';
 import { appleStatus, findOnApple, isConnected as appleConnected, musicKit } from '../apple';
-import { playSong, syncIcons } from '../player';
+import { playShuffled, playSong, syncIcons } from '../player';
 import { keyName, staffSVG, toMeasures } from '../music/notation';
 import { albums, genresInUse, inMainLibrary, isExternalView, playable, rerender, reload, saveSetting, stage, state, viewName, visible, writerName, type SideTab } from '../state';
 import { $, cssUrl, esc, hueOf, PLAY, toast } from '../util';
@@ -124,7 +124,7 @@ export function renderHead() {
     title +
     `<span class="meta">${list.length} song${list.length === 1 ? '' : 's'}</span>` +
     (p?.missing ? `<span class="meta" title="Songs from your other devices that aren't in this library yet. They stay in the playlist and show up here once you have them.">${p.missing} not on this device</span>` : '') +
-    (list.some(playable) ? `<button class="btn small" id="playAll">${PLAY.replace('<svg', '<svg width="12" height="12"')}Play all</button>` : '') +
+    (list.some(playable) ? `<button class="btn small" id="playAll">${PLAY.replace('<svg', '<svg width="12" height="12"')}Play all</button><button class="btn small" id="shuffleAll" title="Play these in a random order">Shuffle</button>` : '') +
     (p ? '<button class="btn small" id="plDel">Delete playlist</button>' : '');
 }
 
@@ -180,7 +180,7 @@ export function renderGrid() {
           const sub = s.source === 'ai'
             ? writing ? esc((s.request ?? '').slice(0, 70)) + ((s.request ?? '').length > 70 ? '…' : '') : [s.subGenre, keyName(s.key), s.bpm ? `${s.bpm} BPM` : ''].filter(Boolean).map(esc).join(', ')
             : esc([s.artist, s.album].filter(Boolean).join(', '));
-          return `<article class="card${writing ? ' writing' : ''}${s.missing ? ' missing' : ''}" tabindex="0" role="button" data-id="${s.id}" aria-label="Open ${esc(s.title)}"${s.missing ? ' title="Its file can\'t be found right now (moved, or the drive is offline). It comes back when the file does."' : ''}>
+          return `<article class="card${writing ? ' writing' : ''}${s.missing ? ' missing' : ''}" tabindex="0" role="button" draggable="true" data-id="${s.id}" aria-label="Open ${esc(s.title)}"${s.missing ? ' title="Its file can\'t be found right now (moved, or the drive is offline). It comes back when the file does."' : ''}>
         ${cover(s)}
         <div class="body">
           <h3>${esc(s.title)}</h3>
@@ -317,6 +317,7 @@ export function initLibrary(actions: { addFolder: () => void; request: () => voi
       const list = visible().filter(playable);
       if (list.length) playSong(list[0], list);
     }
+    if (t.closest('#shuffleAll')) playShuffled(visible());
     if (t.closest('#plDel') && state.view.kind === 'pl') {
       const id = state.view.id, name = state.playlists.find((p) => p.id === id)?.name;
       try {

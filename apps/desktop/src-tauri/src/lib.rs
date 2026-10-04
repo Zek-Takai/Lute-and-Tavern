@@ -333,6 +333,26 @@ async fn set_master_take(state: State<'_, AppState>, song: i64, take: i64) -> Re
 }
 
 #[tauri::command]
+async fn set_song_written(state: State<'_, AppState>, id: i64, written: bool, writer: String) -> Res<Song> {
+    blocking(&state, move |l| l.set_song_written(id, written, &writer)).await
+}
+
+/// Shows the song's file (or its folder) in Finder / Explorer.
+#[tauri::command]
+async fn reveal_song(app: tauri::AppHandle, state: State<'_, AppState>, id: i64) -> Res<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let lib = state.lib.clone();
+    let path = tauri::async_runtime::spawn_blocking(move || -> anyhow::Result<Option<PathBuf>> {
+        Ok(lib.audio_path(id)?.or_else(|| lib.song(id).ok().and_then(|s| s.song_dir).map(PathBuf::from)))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("{e:#}"))?
+    .ok_or("This song has no file on this computer.")?;
+    app.opener().reveal_item_in_dir(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn set_status(state: State<'_, AppState>, song: i64, status: String) -> Res<()> {
     blocking(&state, move |l| l.set_status(song, &status)).await
 }
@@ -558,6 +578,8 @@ pub fn run() {
             musickit::musickit_forget_key,
             musickit::musickit_token,
             save_external_song,
+            set_song_written,
+            reveal_song,
             pull_apple_library,
             add_apple_to_playlist,
             close_signin_windows,

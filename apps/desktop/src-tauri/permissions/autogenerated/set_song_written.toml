@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-song-written"
+description = "Enables the set_song_written command without any pre-configured scope."
+commands.allow = ["set_song_written"]
+
+[[permission]]
+identifier = "deny-set-song-written"
+description = "Denies the set_song_written command without any pre-configured scope."
+commands.deny = ["set_song_written"]

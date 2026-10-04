@@ -53,6 +53,8 @@ commands.allow = [
   "musickit_forget_key",
   "musickit_token",
   "save_external_song",
+  "set_song_written",
+  "reveal_song",
   "pull_apple_library",
   "add_apple_to_playlist",
   "close_signin_windows",
