@@ -2,12 +2,12 @@
 import { api, errText, lt, type Song } from '../api';
 import { playSong, syncIcons } from '../player';
 import { keyName, staffSVG, toMeasures } from '../music/notation';
-import { albums, genresInUse, inMainLibrary, playable, rerender, reload, saveSetting, stage, state, viewName, visible, writerName, type SideTab } from '../state';
+import { albums, genresInUse, inMainLibrary, isExternalView, playable, rerender, reload, saveSetting, stage, state, viewName, visible, writerName, type SideTab } from '../state';
 import { $, esc, hueOf, PLAY, toast } from '../util';
 import { artUrl } from '../apple';
-import { appleHead, applePanel, handleApplePanelClick, renderAppleGrid } from './apple';
+import { appleHead, applePanel, handleApplePanelClick, openApplePage, renderAppleGrid } from './apple';
 import { openSong } from './song';
-import { handleSourcePanelClick, radioHead, radioPanel, remoteHead, renderRadioGrid, renderRemoteGrid, serversPanel } from './sources';
+import { handleSourcePanelClick, openRadio, openServers, radioHead, radioPanel, remoteHead, renderRadioGrid, renderRemoteGrid, serversPanel } from './sources';
 
 /** Stages of a written song, for filters; songs with audio are just songs, so only the first two get a label on cards. */
 export const STATUS: Record<string, [string, string]> = {
@@ -197,9 +197,20 @@ export function initLibrary(actions: { addFolder: () => void; request: () => voi
     // Clicking the open tab again folds the panel away for more room.
     panelOpen = !(panelOpen && state.sideTab === k);
     void saveSetting('sidePanelOpen', panelOpen);
+    const changed = state.sideTab !== k;
     state.sideTab = k;
     if (panelOpen) sideQuery = '';
-    renderSide();
+    // The main page follows the icon: Apple Music, Radio and servers open their page where it was left;
+    // the library icons bring back the last My music view.
+    if (changed || !panelOpen) {
+      if (k === 'apple') openApplePage();
+      else if (k === 'radio') openRadio();
+      else if (k === 'servers') openServers();
+      else if (isExternalView(state.view)) {
+        state.view = state.lastLibraryView;
+        rerender();
+      } else renderSide();
+    } else renderSide();
     if (panelOpen) $('#sideFind')?.focus();
   };
   $('#sideToggle').onclick = () => {
@@ -245,7 +256,10 @@ export function initLibrary(actions: { addFolder: () => void; request: () => voi
       state.view = x.startsWith('pl:') ? { kind: 'pl', id: Number(x.slice(3)) } : { kind: x as 'all' | 'ai' | 'library' };
       state.filter = 'all';
     }
-    if (g) state.genre = g.dataset.g!;
+    if (g) {
+      state.genre = g.dataset.g!;
+      if (isExternalView(state.view)) state.view = state.lastLibraryView;
+    }
     if (v || g) rerender();
   };
   const head = $('#viewHead');

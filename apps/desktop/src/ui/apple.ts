@@ -70,6 +70,13 @@ export async function handleApplePanelClick(t: HTMLElement, openSettings: () => 
   return true;
 }
 
+/** Opens the Apple Music page where the person left it (the sidebar icon). */
+export function openApplePage() {
+  state.view = { kind: 'apple' };
+  state.sideTab = 'apple';
+  rerender();
+}
+
 /** Opens the Apple Music page on a search (from the main search bar). */
 export function showAppleSearch(q: string) {
   term = q;

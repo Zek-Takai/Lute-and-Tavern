@@ -13,10 +13,10 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { open as pickFiles } from '@tauri-apps/plugin-dialog';
 import { api, errText } from './api';
 import { aiControl, cycleRepeat, initPlayer, initQueue, refreshQueue, restoreNowPlaying, step, stop, togglePlay } from './player';
-import { onRender, reload, state, visible, writerName } from './state';
+import { isExternalView, onRender, reload, state, visible, writerName } from './state';
 import { initLibrary, renderChips, renderGrid, renderHead, renderSide } from './ui/library';
 import { initAssistant } from './ui/assistant';
-import { initSearch } from './ui/search';
+import { initSearch, syncSearchSource } from './ui/search';
 import { initSources } from './ui/sources';
 import { addMusicFolder, addSongsToLibrary, checkForUpdatesAtStart, chooseLibrary, openSettings } from './ui/settings';
 import { initSheetKeys } from './ui/sheet';
@@ -28,6 +28,8 @@ import { $, toast } from './util';
 import { startVisualizer } from './visualizer';
 
 function renderAll() {
+  if (!isExternalView(state.view)) state.lastLibraryView = state.view;
+  syncSearchSource();
   refreshQueue();
   renderSide();
   renderHead();

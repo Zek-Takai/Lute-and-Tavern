@@ -64,6 +64,21 @@ let radio: RadioMode = { mode: 'home' };
 let radioData: { title: string; groups: { title: string; list: Station[] }[]; tags: string[] } | null = null;
 let radioBusy = false;
 
+/** Opens Radio where the person left it; the first time after launch that is Radio home. */
+export function openRadio() {
+  state.view = { kind: 'radio' };
+  state.sideTab = 'radio';
+  rerender();
+}
+
+/** Opens the last server page, or the first server's home; with no servers, just the panel. */
+export function openServers() {
+  state.sideTab = 'servers';
+  if (remote && connections.some((c) => c.id === remote!.id)) state.view = { kind: 'remote', id: remote.id };
+  else if (connections.length) return showRemote({ id: connections[0].id, mode: 'home' });
+  rerender();
+}
+
 export function showRadio(m: RadioMode = { mode: 'home' }) {
   radio = m;
   radioData = null;

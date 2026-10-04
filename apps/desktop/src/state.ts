@@ -13,6 +13,8 @@ export const state = {
   settings: {} as Record<string, unknown>,
   writer: { baseUrl: '', model: '', name: 'Bard', hasKey: false } as WriterSettings,
   view: { kind: 'all' } as View,
+  /** The last My music view (All, a playlist, an album…), to return to from Apple Music, Radio or a server. */
+  lastLibraryView: { kind: 'all' } as View,
   genre: 'all',
   filter: 'all',
   sideTab: 'library' as SideTab,
@@ -22,6 +24,8 @@ export const state = {
 
 let renderAll: () => void = () => {};
 export const onRender = (fn: () => void) => (renderAll = fn);
+/** Views that show music from outside the library. */
+export const isExternalView = (v: View) => v.kind === 'apple' || v.kind === 'radio' || v.kind === 'remote';
 export const rerender = () => renderAll();
 
 export async function reload() {

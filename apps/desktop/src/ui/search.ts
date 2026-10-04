@@ -106,6 +106,25 @@ function openResults() {
   else openSourceSearch(source(), q);
 }
 
+let syncedFor = '';
+
+/** The picker follows the page: My music, Apple Music, Radio or the open server. A choice made by hand
+ *  stays until the person moves to another page. */
+export function syncSearchSource() {
+  const sel = document.getElementById('qSource') as HTMLSelectElement | null;
+  if (!sel) return;
+  const v = state.view;
+  const src = v.kind === 'apple' ? 'apple' : v.kind === 'radio' ? 'radio' : v.kind === 'remote' ? `conn:${v.id}` : 'library';
+  const key = v.kind === 'remote' ? src : v.kind === 'apple' || v.kind === 'radio' ? v.kind : 'library';
+  if (key === syncedFor) return;
+  syncedFor = key;
+  if (sel.value === src || ![...sel.options].some((o) => o.value === src)) return;
+  sel.value = src;
+  input().placeholder = placeholder(src);
+  input().value = '';
+  close();
+}
+
 export function initSearch() {
   const sel = $<HTMLSelectElement>('#qSource');
   fillSources();
