@@ -1,5 +1,7 @@
 //! Subsonic API (OpenSubsonic): Navidrome, Airsonic, Gonic, Ampache, Funkwhale, Lyrion, many NAS music apps.
-//! Signs in with a salted token, so the password itself is never sent.
+//! Signs in with a salted token, so the password itself is never sent. Servers that refuse tokens (Nextcloud
+//! Music, LDAP-backed servers) use the API's plain-password sign-in instead, recorded per connection as
+//! `legacyAuth` when the connection is added (only sensible over HTTPS).
 
 use crate::remote::{Connection, MusicServer, RemoteItem, RemoteSearch, Target, http, list, text};
 use anyhow::{Result, anyhow, bail};
@@ -12,14 +14,20 @@ pub struct Subsonic<'a> {
 }
 
 impl Subsonic<'_> {
-    /// Address of a call, with the salted-token sign-in the API uses.
+    /// Address of a call, with the salted-token sign-in (or the plain-password one for servers that need it).
     pub fn url(&self, method: &str, extra: &[(&str, &str)]) -> String {
-        let salt = format!("{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
-        let token = format!("{:x}", Md5::digest(format!("{}{salt}", self.password).as_bytes()));
         let mut u = reqwest::Url::parse(&format!("{}/rest/{method}", self.conn.base_url)).expect("checked when the connection was added");
         {
             let mut q = u.query_pairs_mut();
-            q.append_pair("u", &self.conn.username).append_pair("t", &token).append_pair("s", &salt);
+            q.append_pair("u", &self.conn.username);
+            if self.conn.extra["legacyAuth"].as_bool().unwrap_or(false) {
+                let hex: String = self.password.bytes().map(|b| format!("{b:02x}")).collect();
+                q.append_pair("p", &format!("enc:{hex}"));
+            } else {
+                let salt = format!("{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+                let token = format!("{:x}", Md5::digest(format!("{}{salt}", self.password).as_bytes()));
+                q.append_pair("t", &token).append_pair("s", &salt);
+            }
             q.append_pair("v", "1.16.1").append_pair("c", "LuteAndTavern").append_pair("f", "json");
             for (k, v) in extra {
                 q.append_pair(k, v);
@@ -130,6 +138,13 @@ mod tests {
         let u = s.stream("abc").unwrap().url;
         assert!(u.starts_with("http://nas.local:4533/rest/stream.view?u=listener&t="));
         assert!(!u.contains("hunter2"), "only the salted token goes on the wire");
+    }
+
+    #[test]
+    fn servers_that_refuse_tokens_get_the_plain_sign_in() {
+        let c = Connection { id: 1, kind: "subsonic".into(), name: "NC".into(), base_url: "https://nas:8090/apps/music/subsonic".into(), username: "listener".into(), extra: serde_json::json!({"legacyAuth": true}) };
+        let u = Subsonic { conn: &c, password: "ab" }.url("ping.view", &[]);
+        assert!(u.contains("u=listener&p=enc%3A6162") && !u.contains("&t="), "{u}");
     }
 
     #[test]

@@ -103,9 +103,18 @@ pub async fn connection_add(state: State<'_, AppState>, kind: String, name: Stri
         let (secret, extra, server) = match kind.as_str() {
             "jellyfin" => lt_core::remote_jellyfin::sign_in(&base, &username, &password, &device_id(&lib))?,
             "subsonic" | "webdav" => {
-                let probe = remote::Connection { id: 0, kind: kind.clone(), name: name.clone(), base_url: base.clone(), username: username.clone(), extra: serde_json::Value::Null };
-                let server = remote::server(&probe, &password)?.ping()?;
-                (password.clone(), serde_json::json!({}), server)
+                let mut probe = remote::Connection { id: 0, kind: kind.clone(), name: name.clone(), base_url: base.clone(), username: username.clone(), extra: serde_json::json!({}) };
+                let first = remote::server(&probe, &password)?.ping();
+                match first {
+                    Ok(server) => (password.clone(), serde_json::json!({}), server),
+                    // Some Subsonic servers (Nextcloud Music, LDAP setups) refuse token sign-in; try the plain one.
+                    Err(e) if kind == "subsonic" => {
+                        probe.extra = serde_json::json!({"legacyAuth": true});
+                        let server = remote::server(&probe, &password)?.ping().map_err(|_| e)?;
+                        (password.clone(), serde_json::json!({"legacyAuth": true}), server)
+                    }
+                    Err(e) => return Err(e),
+                }
             }
             "plex" => anyhow::bail!("Plex connects with the Sign in with Plex button"),
             k => anyhow::bail!("Unknown kind of connection: {k}"),

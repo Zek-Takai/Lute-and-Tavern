@@ -50,11 +50,9 @@ pub fn url_for(target: &str) -> String {
     format!("{}{}", base(), URL_SAFE_NO_PAD.encode(target))
 }
 
-/// Relay address for a target that needs headers. The same target always gets the same key.
+/// Relay address for a connected server's file or cover. Always a short key, so neither sign-in headers nor
+/// sign-in details inside the address ever reach the page. The same target always gets the same key.
 pub fn register(t: lt_core::remote::Target) -> String {
-    if t.headers.is_empty() {
-        return url_for(&t.url);
-    }
     let key = {
         use md5::{Digest, Md5};
         let mut h = Md5::new();
