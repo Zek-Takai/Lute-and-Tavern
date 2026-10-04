@@ -53,7 +53,8 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
           float h=sin(p.x*.16+t*.35+ph)*1.6+sin(p.z*.23-t*.28+ph*.7)*1.1+sin((p.x-p.z)*.09+t*.2)*1.8;
           h*=.35+uIntensity*1.15+uRise*.5+uBody*.25;
           h+=sin(r*.55-t*2.6)*uBass*2.4*exp(-r*.035);
-          float ring=exp(-pow((r-uKickAge*34.)*.33,2.))*uKickAmp*exp(-uKickAge*2.2);
+          float rd=(r-uKickAge*34.)*.33;
+          float ring=exp(-rd*rd)*uKickAmp*exp(-uKickAge*2.2);
           h+=ring*3.;
           h+=sin(p.x*.9+t*3.1)*sin(p.z*.8-t*2.4)*(uAir*.6+uHat*.9);
           float voice=aLayer==1.?uVocal*exp(-abs(p.z)*.09)*(1.4+sin(p.x*.14-t*1.1)*1.1):0.;
@@ -109,7 +110,7 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
   addEventListener('resize', size);
   size();
 
-  let t = 0, last = performance.now(), kickAge = 9, kickAmp = 0, lastKick = 0;
+  let t = 0, last = performance.now(), kickAge = 9, kickAmp = 0, lastKick = 0, listenFailed = false;
   const frame = (now: number) => {
     requestAnimationFrame(frame);
     if (document.hidden) {
@@ -118,7 +119,13 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
     }
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
-    listen(dt);
+    // listening must never stop the picture: on any error it carries on without the music
+    try {
+      listen(dt);
+    } catch (e) {
+      if (!listenFailed) console.error('visualizer listening failed', e);
+      listenFailed = true;
+    }
     const f = features;
     // a new kick starts a new ring
     if (f.kick > lastKick + 0.5) {

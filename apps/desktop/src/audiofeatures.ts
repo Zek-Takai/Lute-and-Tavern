@@ -14,6 +14,7 @@ export const features: Features = { kick: 0, snare: 0, hat: 0, bass: 0, body: 0,
 
 const FFT = 2048;
 let built: AudioContext | null = null;
+let broken: AudioContext | null = null;
 let aMid: AnalyserNode, aSide: AnalyserNode;
 let mid: Float32Array<ArrayBuffer>, side: Float32Array<ArrayBuffer>, prev: Float32Array<ArrayBuffer>, wave: Float32Array<ArrayBuffer>;
 let hz = 23.4;
@@ -33,16 +34,23 @@ function analyserOn(ac: AudioContext, node: AudioNode, sink: AudioNode) {
 /** Mid (left + right: what's centered, where a lead vocal sits) and side (left − right: the wide parts). */
 function build() {
   const g = audioGraph();
-  if (!g || built === g.ac) return !!g;
+  if (!g || broken === g.ac) return false;
+  if (built === g.ac) return true;
+  // set up once per sound graph; if it can't be, don't retry every frame
+  broken = g.ac;
   const { ac, master } = g;
   const sink = ac.createGain();
   sink.gain.value = 0; // analysers must be pulled by the graph to run; this keeps them silent
   sink.connect(ac.destination);
+  // A splitter's channel handling can't be changed, so a two-channel stage in front of it turns a mono song
+  // into left = right (all mid).
+  const stereo = ac.createGain();
+  stereo.channelCount = 2;
+  stereo.channelCountMode = 'explicit';
+  stereo.channelInterpretation = 'speakers';
   const split = ac.createChannelSplitter(2);
-  split.channelCountMode = 'explicit';
-  split.channelCount = 2;
-  split.channelInterpretation = 'speakers'; // a mono song becomes left = right (all mid)
-  master.connect(split);
+  master.connect(stereo);
+  stereo.connect(split);
   const m = ac.createGain(), sd = ac.createGain();
   const add = (ch: number, to: GainNode, k: number) => {
     const x = ac.createGain();
@@ -56,6 +64,7 @@ function build() {
   mid = new Float32Array(FFT / 2); side = new Float32Array(FFT / 2); prev = new Float32Array(FFT / 2); wave = new Float32Array(FFT);
   hz = ac.sampleRate / FFT;
   built = ac;
+  broken = null;
   return true;
 }
 
