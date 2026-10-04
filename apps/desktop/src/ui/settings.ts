@@ -5,6 +5,7 @@ import { api, errText, type McpInfo, type PlexServer, type SpeechSettings, type 
 import { comboOf, DEFAULT_KEYS, keyLabel } from './assistant';
 import { connections, loadConnections, syncStatus } from './sources';
 import { applyLineColor, applySkin, LINE_COLORS, SKINS } from '../player';
+import { applePullText, runApplePull } from './apple';
 import { appleStatus, connectApple, disconnectApple, forgetAppleKey, isConnected, musicKit, setAppleKey, type AppleStatus } from '../apple';
 import { libraryFolder, reload, rerender, saveSetting, state } from '../state';
 import { $, copyText, esc, toast } from '../util';
@@ -210,6 +211,8 @@ function render() {
           ${isConnected() ? '<button class="btn small" id="amOff">Disconnect</button>' : apple.ready ? '' : '<span class="muted">Available once the key is saved.</span>'}</li>
       </ol>
       <label class="row small"><input type="checkbox" id="amShow" ${state.settings.showAppleInLibrary === false ? '' : 'checked'}> Show saved Apple Music songs in my library (they always show in playlists and the Apple Music tab)</label>
+      <label class="row small"><input type="checkbox" id="amPull" ${state.settings.appleLibrarySync ? 'checked' : ''}> Bring my Apple Music songs and playlists into My music (refreshed when the app opens and every few hours). Songs you already have as files, or on your music server, are used instead of the Apple copy.</label>
+      ${isConnected() ? `<div class="row"><button class="btn small" id="amPullNow">Bring them in now</button><span class="muted small" id="amPullStatus">${esc(applePullText())}</span></div>` : ''}
     </section>
 
     <section class="set-sec">
@@ -419,6 +422,23 @@ function render() {
   });
   document.getElementById('amOff')?.addEventListener('click', async () => { await disconnectApple().catch(() => {}); render(); rerender(); });
   $('#amShow').onchange = async (e) => { await saveSetting('showAppleInLibrary', (e.target as HTMLInputElement).checked); rerender(); };
+  $('#amPull').onchange = async (e) => {
+    const on = (e.target as HTMLInputElement).checked;
+    await saveSetting('appleLibrarySync', on);
+    if (on && isConnected()) document.getElementById('amPullNow')?.click();
+  };
+  document.getElementById('amPullNow')?.addEventListener('click', async () => {
+    const st = (m: string) => { const el = document.getElementById('amPullStatus'); if (el) el.textContent = m; };
+    const btn = document.getElementById('amPullNow') as HTMLButtonElement;
+    btn.disabled = true;
+    try {
+      await runApplePull(st);
+    } catch {
+      /* the message is saved for the status line */
+    }
+    btn.disabled = false;
+    st(applePullText());
+  });
   let keyPath = '';
   const validId = (v: string) => /^[A-Z0-9]{10}$/i.test(v.trim());
   const checkSave = () => {

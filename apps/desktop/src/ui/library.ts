@@ -1,6 +1,7 @@
 // Sidebar (Library / Playlists / Genres), the view header, status chips and the song grid.
 import { api, errText, lt, type Song } from '../api';
-import { message, open as pickFiles } from '@tauri-apps/plugin-dialog';
+import { ask, message, open as pickFiles } from '@tauri-apps/plugin-dialog';
+import { appleStatus, findOnApple, isConnected as appleConnected, musicKit } from '../apple';
 import { playSong, syncIcons } from '../player';
 import { keyName, staffSVG, toMeasures } from '../music/notation';
 import { albums, genresInUse, inMainLibrary, isExternalView, playable, rerender, reload, saveSetting, stage, state, viewName, visible, writerName, type SideTab } from '../state';
@@ -252,7 +253,22 @@ export function initLibrary(actions: { addFolder: () => void; request: () => voi
           `Imported ${res.length} playlist${res.length === 1 ? '' : 's'}. Found ${found} of ${total} songs in your library${reps ? ` (${reps} repeat${reps === 1 ? '' : 's'} kept once)` : ''}.`,
           ...(missing.length ? ['', `Not in your library (${missing.length}):`, ...missing.slice(0, 25), ...(missing.length > 25 ? [`…and ${missing.length - 25} more`] : [])] : []),
         ];
-        await message(lines.join('\n'), { title: 'Import playlists' });
+        const lookFor = res.flatMap((r) => r.missingEntries.map((m) => ({ pl: r.id, m })));
+        const apple = lookFor.length && (await appleStatus().catch(() => null))?.ready && (await musicKit().then(() => appleConnected()).catch(() => false));
+        if (!apple) return void (await message(lines.join('\n'), { title: 'Import playlists' }));
+        if (!(await ask([...lines, '', `Look for the ${lookFor.length} missing song${lookFor.length === 1 ? '' : 's'} in Apple Music and add them to the playlists?`].join('\n'), { title: 'Import playlists', okLabel: 'Look in Apple Music', cancelLabel: 'Not now' }))) return;
+        let fromApple = 0;
+        const still: string[] = [];
+        for (const [i, { pl, m }] of lookFor.entries()) {
+          toast(`Looking in Apple Music: ${i + 1} of ${lookFor.length}`);
+          const hit = await findOnApple(m).catch(() => null);
+          if (hit) {
+            fromApple += await api.addAppleToPlaylist(pl, [{ song: hit, after: m.after }]).catch(() => 0);
+          } else still.push(m.artist ? `${m.artist} – ${m.title}` : m.title);
+        }
+        await reload();
+        rerender();
+        await message([`Found ${fromApple} of ${lookFor.length} in Apple Music and added them.`, ...(still.length ? ['', 'Still missing:', ...still.slice(0, 25), ...(still.length > 25 ? [`…and ${still.length - 25} more`] : [])] : [])].join('\n'), { title: 'Import playlists' });
       } catch (err) {
         toast(errText(err));
       }

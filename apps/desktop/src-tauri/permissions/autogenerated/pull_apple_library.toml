@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pull-apple-library"
+description = "Enables the pull_apple_library command without any pre-configured scope."
+commands.allow = ["pull_apple_library"]
+
+[[permission]]
+identifier = "deny-pull-apple-library"
+description = "Denies the pull_apple_library command without any pre-configured scope."
+commands.deny = ["pull_apple_library"]

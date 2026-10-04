@@ -20,7 +20,7 @@ import { initSearch, syncSearchSource } from './ui/search';
 import { initSources } from './ui/sources';
 import { addMusicFolder, addSongsToLibrary, checkForUpdatesAtStart, chooseLibrary, openSettings } from './ui/settings';
 import { initSheetKeys } from './ui/sheet';
-import { initApple } from './ui/apple';
+import { initApple, startApplePulls } from './ui/apple';
 import { onAppleChange } from './apple';
 import { initSecureStorage } from './secureStorage';
 import { activeTab, cur, initSong, refreshSong } from './ui/song';
@@ -154,6 +154,7 @@ async function boot() {
   initLibrary({ addFolder: () => void addMusicFolder(), request: () => void openRequest(), setupLibrary: (suggested: boolean) => void chooseLibrary(suggested), settings: () => void openSettings() });
   initSong();
   initApple();
+  startApplePulls();
   await initSources();
   initSearch();
   onAppleChange(() => renderAll());

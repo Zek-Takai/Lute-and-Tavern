@@ -107,6 +107,9 @@ pub struct ExternalSong {
     pub track: Option<i64>,
     pub duration: Option<f64>,
     pub art_url: Option<String>,
+    /// When the person added it on the service (unix seconds), if known.
+    #[serde(default)]
+    pub added: Option<i64>,
 }
 
 const SONG_COLS: &str = "s.id, s.source, s.title, s.artist, s.album, s.year, s.genre, s.track, s.duration, \
@@ -2328,6 +2331,7 @@ mod tests {
             track: Some(3),
             duration: Some(201.0),
             art_url: Some("https://is1-ssl.mzstatic.com/{w}x{h}bb.jpg".into()),
+            added: None,
         };
         let a = l.save_external_song(&e).unwrap();
         let b = l.save_external_song(&e).unwrap();

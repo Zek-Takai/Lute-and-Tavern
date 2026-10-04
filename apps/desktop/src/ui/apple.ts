@@ -6,7 +6,9 @@ import {
 } from '../apple';
 import { playSong, syncIcons } from '../player';
 import { reload, rerender, state } from '../state';
-import { $, esc, PLAY, toast } from '../util';
+import { $, contextMenu, esc, PLAY, toast } from '../util';
+import { pullAppleLibrary, externalOf, type ApplePull } from '../apple';
+import { saveSetting } from '../state';
 
 export type AppleSec = 'search' | 'songs' | 'playlists' | 'recent' | 'foryou' | 'charts' | 'open';
 interface Page { title: string; sub?: string; songs: AppleItem[]; groups: { title: string; items: AppleItem[] }[] }
@@ -112,7 +114,8 @@ export const appleTitle = () =>
 export function appleHead() {
   return `<h2>${esc(appleTitle())}</h2>${opened?.artist ? `<span class="meta">${esc(opened.artist)}</span>` : ''}<span class="src src-apple">Apple Music</span>
     ${sec === 'search' ? `<form id="aSearchForm" class="row" style="flex:1 1 260px"><input class="inline-input" id="aSearch" type="search" placeholder="Search songs, albums, artists, playlists" value="${esc(term)}" style="flex:1"><button class="btn small">Search</button></form>` : ''}
-    ${page?.songs.length ? `<button class="btn small" id="aPlayAll">${PLAY.replace('<svg', '<svg width="12" height="12"')}Play all</button>` : ''}`;
+    ${page?.songs.length ? `<button class="btn small" id="aPlayAll">${PLAY.replace('<svg', '<svg width="12" height="12"')}Play all</button>` : ''}
+    ${sec === 'open' && page?.songs.length ? '<button class="btn small" id="aSavePl" title="Make a playlist of these songs in My music">Save as playlist</button>' : ''}`;
 }
 
 async function load(): Promise<Page> {
@@ -150,6 +153,7 @@ function songCard(it: AppleItem, i: number) {
     <div class="body"><h3>${esc(it.name)}</h3><div class="meta">${esc([it.artist, it.raw.attributes?.albumName].filter(Boolean).join(', '))}</div>
       <div class="foot"><span class="src src-apple">Apple Music</span><span style="margin-right:auto"></span>
         <button class="btn small" data-asave="${i}" ${saved ? 'disabled' : ''}>${saved ? 'Saved' : '+ Save'}</button>
+        <button class="btn small" data-apl="${i}" title="Add to a playlist">+ Playlist</button>
         <button class="play" data-aplay="${i}" data-play="${s.id}" aria-label="Play">${PLAY}</button></div></div></article>`;
 }
 function boxCard(it: AppleItem, g: number, i: number) {
@@ -217,6 +221,12 @@ export function initApple() {
       }
       return;
     }
+    const pl = t.closest<HTMLElement>('[data-apl]');
+    if (pl) {
+      e.stopImmediatePropagation();
+      playlistMenu(e as MouseEvent, page.songs[Number(pl.dataset.apl)]);
+      return;
+    }
     const box = t.closest<HTMLElement>('[data-open]');
     if (box) {
       e.stopImmediatePropagation();
@@ -234,9 +244,106 @@ export function initApple() {
     page = null;
     rerender();
   });
-  $('#viewHead').addEventListener('click', (e) => {
+  grid.addEventListener('contextmenu', (e) => {
+    if (state.view.kind !== 'apple' || !page) return;
+    const card = (e.target as HTMLElement).closest<HTMLElement>('[data-ai]');
+    if (card) playlistMenu(e, page.songs[Number(card.dataset.ai)]);
+  });
+  $('#viewHead').addEventListener('click', async (e) => {
+    if ((e.target as HTMLElement).closest('#aSavePl') && page && opened) {
+      const name = opened.name;
+      try {
+        const p = await api.createPlaylist(name, []);
+        const n = await api.addAppleToPlaylist(p.id, page.songs.filter((it) => it.raw.attributes?.playParams).map((it) => ({ song: externalOf(it.raw), after: null })));
+        await reload();
+        rerender();
+        toast(`Saved "${name}" as a playlist (${n} song${n === 1 ? '' : 's'})`);
+      } catch (err) {
+        toast(errText(err));
+      }
+      return;
+    }
     if (!(e.target as HTMLElement).closest('#aPlayAll') || !page) return;
     const list = songsOf(page.songs).map((x) => savedFor(x) ?? x);
     if (list.length) playSong(list[0], list);
   });
+}
+
+/** "Add to playlist" for an Apple song: every playlist, or a new one. The song is saved to the library on the way. */
+function playlistMenu(e: MouseEvent, it: AppleItem | undefined) {
+  if (!it) return;
+  const song = externalOf(it.raw);
+  const add = async (id: number, name: string) => {
+    try {
+      const n = await api.addAppleToPlaylist(id, [{ song, after: null }]);
+      await reload();
+      rerender();
+      toast(n ? `Added "${it.name}" to ${name}` : `"${it.name}" is already in ${name}`);
+    } catch (err) {
+      toast(errText(err));
+    }
+  };
+  contextMenu(e, [
+    ...state.playlists.map((p): [string, () => void] => [`Add to ${p.name}`, () => void add(p.id, p.name)]),
+    ['New playlist with this song', async () => {
+      try {
+        const p = await api.createPlaylist(`Playlist ${state.playlists.length + 1}`, []);
+        await add(p.id, p.name);
+      } catch (err) {
+        toast(errText(err));
+      }
+    }],
+  ]);
+}
+
+let pulling = false;
+
+/** Words for the last Apple library pull, for Settings. */
+export function applePullText(): string {
+  const l = state.settings.appleLastPull as { at: number; message: string } | undefined;
+  return pulling ? 'Bringing in your Apple Music library…' : l ? `${l.message} (${new Date(l.at * 1000).toLocaleString()})` : '';
+}
+
+/** Brings the person's Apple Music songs and playlists into My music (once at a time). */
+export async function runApplePull(progress: (m: string) => void = () => {}): Promise<ApplePull | null> {
+  if (pulling) return null;
+  pulling = true;
+  try {
+    const r = await pullAppleLibrary(progress);
+    const parts = [
+      `${r.songs} Apple Music song${r.songs === 1 ? '' : 's'}`,
+      r.haveOwn ? `${r.haveOwn} already yours as files` : '',
+      r.added ? `${r.added} new` : '',
+      r.removed ? `${r.removed} removed` : '',
+      `${r.playlists} playlist${r.playlists === 1 ? '' : 's'}${r.playlistsUpdated ? ` (${r.playlistsUpdated} updated)` : ''}`,
+    ].filter(Boolean);
+    let message = parts.join(', ') + '.';
+    if (r.unreadable.length) message += ` Could not read: ${r.unreadable.join(', ')}.`;
+    await saveSetting('appleLastPull', { at: Math.floor(Date.now() / 1000), message });
+    await reload();
+    rerender();
+    return r;
+  } catch (e) {
+    await saveSetting('appleLastPull', { at: Math.floor(Date.now() / 1000), message: `Apple Music could not be read: ${errText(e)}` });
+    throw e;
+  } finally {
+    pulling = false;
+  }
+}
+
+/** When the person chose to: brings their Apple Music library in shortly after launch, then every six hours. */
+export function startApplePulls() {
+  const tick = async () => {
+    if (!state.settings.appleLibrarySync) return;
+    const st = await appleStatus().catch(() => null);
+    if (!st?.ready) return;
+    try {
+      const m = await musicKit();
+      if (m.isAuthorized) await runApplePull();
+    } catch {
+      /* reported in Settings */
+    }
+  };
+  setTimeout(() => void tick(), 20_000);
+  setInterval(() => void tick(), 6 * 3600_000);
 }

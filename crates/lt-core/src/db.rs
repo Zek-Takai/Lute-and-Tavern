@@ -195,6 +195,11 @@ const MIGRATIONS: &[&str] = &[
         deleted_at INTEGER NOT NULL
     );
     "#,
+    // v12: songs brought in from a streaming service's library (e.g. "apple-library"), so they can leave
+    // again when the person removes them there; songs they saved by hand stay.
+    r#"
+    ALTER TABLE songs ADD COLUMN synced_from TEXT;
+    "#,
 ];
 
 pub fn open(path: &std::path::Path) -> Result<Connection> {

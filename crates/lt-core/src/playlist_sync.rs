@@ -146,6 +146,7 @@ pub fn sync(lib: &Library, dav: &WebDav, folder: &str) -> Result<PlaylistSync> {
     let locals = lib.local_lists()?;
     let tombs = lib.tombstones()?;
     let songs = lib.songs()?;
+    let (apple, own): (Vec<Song>, Vec<Song>) = songs.iter().cloned().partition(|s| s.provider == "apple");
     let by_id: HashMap<i64, &Song> = songs.iter().map(|s| (s.id, s)).collect();
     let root = lib.library_folder()?.map(|f| std::path::PathBuf::from(f.path));
     let mut used: HashSet<String> = index.playlists.values().map(|e| e.file.to_lowercase()).collect();
@@ -213,7 +214,7 @@ pub fn sync(lib: &Library, dav: &WebDav, folder: &str) -> Result<PlaylistSync> {
                 let parsed = parse_m3u(&String::from_utf8_lossy(&bytes), &e.name);
                 let mut ids = Vec::new();
                 for entry in &parsed.entries {
-                    if let Some(id) = best_match(entry, &songs) {
+                    if let Some(id) = best_match(entry, &own).or_else(|| best_match(entry, &apple)) {
                         if !ids.contains(&id) {
                             ids.push(id);
                         }

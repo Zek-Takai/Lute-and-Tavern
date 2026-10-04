@@ -21,6 +21,7 @@ lute-and-tavern/
 │           ├── radio.rs       internet radio via Radio Browser; saved and recent stations
 │           ├── remote.rs      connections to the person's own music: shared trait, storage
 │           ├── remote_*.rs    one per kind: subsonic, plex (plex.tv sign-in), jellyfin (and Emby), webdav
+│           ├── apple_library.rs the person's Apple Music songs and playlists in My music (own files preferred)
 │           ├── backup.rs      one-way backup of the library folder to WebDAV (moves detected, nothing deleted)
 │           ├── playlist_io.rs playlist import from any common format, forgiving song matching
 │           ├── playlist_sync.rs playlists across devices: .m3u8 files + an index on the backup server

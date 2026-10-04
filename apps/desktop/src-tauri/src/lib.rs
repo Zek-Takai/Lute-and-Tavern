@@ -384,6 +384,30 @@ fn close_signin_windows(app: tauri::AppHandle) {
 }
 
 /// Saves a song from a streaming service (Apple Music) into the library, or returns it if it is there.
+#[derive(serde::Deserialize)]
+struct AppleAdd {
+    song: lt_core::library::ExternalSong,
+    after: Option<i64>,
+}
+
+/// The person's Apple Music songs and playlists, read by the interface through MusicKit.
+#[tauri::command]
+async fn pull_apple_library(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    songs: Vec<lt_core::library::ExternalSong>,
+    playlists: Vec<lt_core::apple_library::ApplePlaylist>,
+) -> Res<lt_core::apple_library::ApplePull> {
+    let r = blocking(&state, move |l| l.pull_apple_library(&songs, &playlists)).await?;
+    emit_library_changed(&app);
+    Ok(r)
+}
+
+#[tauri::command]
+async fn add_apple_to_playlist(state: State<'_, AppState>, playlist: i64, items: Vec<AppleAdd>) -> Res<usize> {
+    blocking(&state, move |l| l.add_apple_to_playlist(playlist, &items.into_iter().map(|a| (a.song, a.after)).collect::<Vec<_>>())).await
+}
+
 #[tauri::command]
 async fn save_external_song(state: State<'_, AppState>, song: lt_core::library::ExternalSong) -> Res<Song> {
     blocking(&state, move |l| l.save_external_song(&song)).await
@@ -509,6 +533,8 @@ pub fn run() {
             musickit::musickit_forget_key,
             musickit::musickit_token,
             save_external_song,
+            pull_apple_library,
+            add_apple_to_playlist,
             close_signin_windows,
             updates::update_info,
             updates::check_update,

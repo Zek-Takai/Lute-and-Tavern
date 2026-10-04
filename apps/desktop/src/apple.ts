@@ -156,6 +156,104 @@ function hash(s: string) {
   return h || 1;
 }
 
+// ---------- the person's Apple Music library in My music ----------
+
+/** Every page of a library list (Apple gives at most 100 at a time). */
+async function paged(path: string): Promise<any[]> {
+  const out: any[] = [];
+  for (let offset = 0; ; ) {
+    const d = await get(path, { limit: 100, offset });
+    const rows = d.data ?? [];
+    out.push(...rows);
+    if (!d.next || !rows.length) return out;
+    offset += rows.length;
+  }
+}
+
+export interface ExternalSong {
+  provider: 'apple'; providerId: string; title: string; artist: string; album: string; genre: string; year: string;
+  track: number | null; duration: number | null; artUrl: string | null; added: number | null;
+}
+
+const secs = (iso?: string) => (iso && !Number.isNaN(Date.parse(iso)) ? Math.floor(Date.parse(iso) / 1000) : null);
+
+/** An Apple song (catalog or library) in the form the library saves. */
+export function externalOf(r: any): ExternalSong {
+  const a = r.attributes ?? {};
+  const pp = a.playParams ?? {};
+  return {
+    provider: 'apple', providerId: String(pp.catalogId ?? pp.id ?? r.id), title: a.name ?? 'Untitled', artist: a.artistName ?? '', album: a.albumName ?? '',
+    genre: a.genreNames?.[0] ?? 'Unsorted', year: String(a.releaseDate ?? '').slice(0, 4), track: a.trackNumber ?? null,
+    duration: a.durationInMillis ? a.durationInMillis / 1000 : null, artUrl: a.artwork?.url ?? null, added: secs(a.dateAdded),
+  };
+}
+const playable = (r: any) => !!r.attributes?.playParams;
+
+export interface ApplePull { songs: number; added: number; haveOwn: number; removed: number; playlists: number; playlistsUpdated: number; unreadable: string[] }
+
+/** Reads the person's Apple Music songs and playlists and brings them into My music. */
+export async function pullAppleLibrary(progress: (m: string) => void): Promise<ApplePull> {
+  const m = await musicKit();
+  if (!m.isAuthorized) throw new Error('Connect Apple Music first (Settings › Apple Music).');
+  progress('Reading your Apple Music songs…');
+  const songs = (await paged('/v1/me/library/songs')).filter(playable).map(externalOf);
+  progress(`Read ${songs.length} songs. Reading your playlists…`);
+  const lists = await paged('/v1/me/library/playlists');
+  const playlists: { id: string; name: string; modified: number | null; tracks: ExternalSong[] }[] = [];
+  const unreadable: string[] = [];
+  for (const [i, p] of lists.entries()) {
+    const name = p.attributes?.name ?? 'Playlist';
+    progress(`Reading playlist ${i + 1} of ${lists.length}: ${name}`);
+    let tracks: any[];
+    try {
+      tracks = await paged(`/v1/me/library/playlists/${p.id}/tracks`);
+    } catch (e: any) {
+      // Apple answers "not found" for an empty playlist; anything else is reported and that playlist is left as it is
+      if (e?.errorCode === 'NOT_FOUND' || /not found|404/i.test(String(e?.message ?? e))) tracks = [];
+      else {
+        unreadable.push(name);
+        continue;
+      }
+    }
+    playlists.push({ id: p.id, name, modified: secs(p.attributes?.lastModifiedDate), tracks: tracks.filter(playable).map(externalOf) });
+  }
+  progress('Adding them to My music…');
+  const r = await invoke<Omit<ApplePull, 'unreadable'>>('pull_apple_library', { songs, playlists });
+  return { ...r, unreadable };
+}
+
+const words = (s: string) => s.toLowerCase().replace(/\(.*?\)|\[.*?\]/g, ' ').split(/[^\p{L}\p{N}]+/u).filter((w) => w && w !== 'the');
+function alike(a: string, b: string) {
+  const x = words(a), y = words(b);
+  if (!x.length || !y.length) return 0;
+  return x.filter((w) => y.includes(w)).length / Math.max(x.length, y.length);
+}
+
+/** The best Apple Music match for a song an import could not find (the person's Apple library first, then the catalog). */
+export async function findOnApple(e: { title: string; artist: string; album: string; duration: number | null }): Promise<ExternalSong | null> {
+  const term = `${e.title} ${e.artist}`.trim();
+  const tries = [
+    async () => ((await get('/v1/me/library/search', { term, types: 'library-songs', limit: 10 })).results?.['library-songs']?.data ?? []) as any[],
+    async () => ((await get('/v1/catalog/{{storefrontId}}/search', { term, types: 'songs', limit: 10 })).results?.songs?.data ?? []) as any[],
+  ];
+  for (const t of tries) {
+    const rows = (await t().catch(() => [])).filter(playable);
+    let best: { s: ExternalSong; score: number } | null = null;
+    for (const r of rows) {
+      const s = externalOf(r);
+      const ti = alike(e.title, s.title);
+      if (ti < 0.75) continue;
+      const ar = e.artist ? alike(e.artist, s.artist) : 0.5;
+      const sameLen = e.duration && s.duration ? Math.abs(e.duration - s.duration) <= 3 : false;
+      if (ar < 0.5 && !sameLen) continue;
+      const score = ti + ar + (sameLen ? 0.5 : 0) + (e.album && alike(e.album, s.album) > 0.6 ? 0.2 : 0);
+      if (!best || score > best.score) best = { s, score };
+    }
+    if (best) return best.s;
+  }
+  return null;
+}
+
 // ---------- playback ----------
 
 /** Plays one Apple song. `onEnd` runs when it finishes so the app's own queue moves on. */

@@ -454,24 +454,41 @@ pub struct ImportResult {
     /// Entries that were the same song again (kept once)
     pub duplicates: usize,
     pub missing: Vec<String>,
+    /// The missing entries themselves, each with the song it came after (so a later find keeps the order).
+    pub missing_entries: Vec<MissingEntry>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissingEntry {
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub duration: Option<f64>,
+    pub after: Option<i64>,
 }
 
 impl Library {
     /// Imports playlist files; each becomes a playlist of the songs that matched (a name already in use gets " (2)").
     pub fn import_playlists(&self, files: &[std::path::PathBuf]) -> Result<Vec<ImportResult>> {
-        let songs: Vec<Song> = self.songs()?.into_iter().filter(|s| s.provider != "apple").collect();
+        // The person's own files and servers first; their saved Apple Music songs when those don't have it.
+        let (apple, songs): (Vec<Song>, Vec<Song>) = self.songs()?.into_iter().partition(|s| s.provider == "apple");
         let mut names: Vec<String> = self.playlists()?.into_iter().map(|p| p.name.to_lowercase()).collect();
         let mut out = Vec::new();
         for f in files {
             for pl in parse_file(f)? {
                 let mut ids = Vec::new();
                 let mut missing = Vec::new();
+                let mut missing_entries = Vec::new();
                 let mut duplicates = 0;
                 for e in &pl.entries {
-                    match best_match(e, &songs) {
+                    match best_match(e, &songs).or_else(|| best_match(e, &apple)) {
                         Some(id) if !ids.contains(&id) => ids.push(id),
                         Some(_) => duplicates += 1,
-                        None => missing.push(if e.artist.is_empty() { e.title.clone() } else { format!("{} – {}", e.artist, e.title) }),
+                        None => {
+                            missing.push(if e.artist.is_empty() { e.title.clone() } else { format!("{} – {}", e.artist, e.title) });
+                            missing_entries.push(MissingEntry { title: e.title.clone(), artist: e.artist.clone(), album: e.album.clone(), duration: e.duration, after: ids.last().copied() });
+                        }
                     }
                 }
                 let mut name = pl.name.trim().to_string();
@@ -483,7 +500,7 @@ impl Library {
                 }
                 names.push(name.to_lowercase());
                 let p = self.create_playlist(&name, &ids)?;
-                out.push(ImportResult { playlist: name, id: p.id, matched: ids.len(), total: pl.entries.len(), duplicates, missing });
+                out.push(ImportResult { playlist: name, id: p.id, matched: ids.len(), total: pl.entries.len(), duplicates, missing, missing_entries });
             }
         }
         Ok(out)

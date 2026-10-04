@@ -71,6 +71,7 @@ export interface ImportedPlaylist {
   total: number;
   duplicates: number;
   missing: string[];
+  missingEntries: { title: string; artist: string; album: string; duration: number | null; after: number | null }[];
 }
 
 export interface BackupSettings { conn: number | null; folder: string; schedule: BackupSchedule; last: number | null; lastReport: { ok?: boolean; message?: string; failed?: string[] } | null; next: number | null; running: boolean }
@@ -132,6 +133,7 @@ export const api = {
   requestSong: (request: string, genre: string | null) => invoke<Song>('request_song', { request, genre }),
   rewriteSong: (id: number, instruction: string) => invoke<void>('rewrite_song', { id, instruction }),
   saveExternalSong: (song: unknown) => invoke<Song>('save_external_song', { song }),
+  addAppleToPlaylist: (playlist: number, items: { song: unknown; after: number | null }[]) => invoke<number>('add_apple_to_playlist', { playlist, items }),
   logEvent: (level: string, message: string) => invoke<void>('log_event', { level, message }).catch(() => {}),
   updateInfo: () => invoke<UpdateInfo>('update_info'),
   mcpInfo: () => invoke<McpInfo>('mcp_info'),
