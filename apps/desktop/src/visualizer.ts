@@ -1,6 +1,6 @@
 // Background visualizer: three layers of glowing silk and drifting motes that follow the music and breathe
 // slowly when nothing plays. Chosen design, see docs/DESIGN.md. What drives it (audiofeatures.ts):
-//   kick drum   a ring of light rolls out from the center      snare   the silk flashes brighter
+//   kick drum   a ring of light rolls out from the center      snare   points along the silk grow
 //   hi-hats     the surface shimmers and motes sparkle          bass    the center swells
 //   voice       a ribbon rises along the middle layer and takes the color of the singer's pitch
 //   section     quiet verses lie low and slow; a big chorus lifts everything, speeds it up, brings the camera in
@@ -63,7 +63,7 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
           vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;
           vec3 base=pal(p.x*.012+aLayer*.17+t*.018+h*.05+uBody*.25);
           vec3 sing=pal(uPitch*.75+.05);
-          vCol=mix(base,sing,clamp(voice*.55,0.,.8))*(.25+.7*smoothstep(-3.,3.,h)+uIntensity*.55+uSnare*.7+ring*.9);
+          vCol=mix(base,sing,clamp(voice*.55,0.,.8))*(.25+.7*smoothstep(-3.,3.,h)+uIntensity*.55+ring*.5);
           vA=smoothstep(40.,24.,abs(position.x))*smoothstep(25.,12.,abs(position.z))*(.4+uIntensity*.6)*(aLayer==1.?1.:.65);
           gl_PointSize=clamp((1.3+max(h,0.)*.35+uAir*1.6+uHat*1.4+uSnare*1.2+voice*.8)*(260./-mv.z)*uPR,1.,14.);
         }`,
@@ -94,7 +94,7 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
           float spark=step(.82,fract(aSeed*91.7+uTime*.07))*uHat;
           vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;
           vCol=mix(pal(aSeed*.6+uTime*.02+.3),pal(uPitch*.75+.05),uVocal*.35)*(.6+tw*.8+spark*1.5);
-          vA=(.2+tw*.4+spark*.5)*(.55+uIntensity*.6+uBass*.4+uSnare*.4);
+          vA=(.2+tw*.4+spark*.5)*(.55+uIntensity*.6);
           gl_PointSize=clamp((1.+aSeed*2.2+uAir*1.8+spark*3.)*(200./-mv.z)*uPR,1.,10.);
         }`,
         fragmentShader: `varying vec3 vCol;varying float vA;void main(){float d=length(gl_PointCoord-.5);gl_FragColor=vec4(vCol,smoothstep(.5,0.,d)*vA);}`,
@@ -110,7 +110,7 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
   addEventListener('resize', size);
   size();
 
-  let t = 0, last = performance.now(), kickAge = 9, kickAmp = 0, lastKick = 0, listenFailed = false;
+  let t = 0, last = performance.now(), kickAge = 9, kickAmp = 0, lastKick = 0, listenFailed = false, camDist = 24;
   const frame = (now: number) => {
     requestAnimationFrame(frame);
     if (document.hidden) {
@@ -148,11 +148,12 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
     U.uVocal.value = f.vocal;
     U.uPitch.value = f.pitch;
     const a = calm ? 0.6 : t * 0.035;
-    const dist = 24 - f.intensity * 4;
-    cam.position.set(Math.sin(a) * dist, 7 + Math.sin(t * 0.11) * 1.6 + (calm ? 0 : f.kick * 0.25), Math.cos(a) * dist);
+    // a chorus brings the camera in slowly
+    camDist += (24 - f.intensity * 4 - camDist) * Math.min(1, dt * 0.4);
+    const dist = camDist;
+    // the camera only drifts: no jumps or zooms on beats (the whole screen pulsing is hard on the eyes)
+    cam.position.set(Math.sin(a) * dist, 7 + Math.sin(t * 0.11) * 1.6, Math.cos(a) * dist);
     cam.lookAt(0, -1, 0);
-    cam.fov = 55 - f.bass * 2 - (calm ? 0 : f.kick * 1.2);
-    cam.updateProjectionMatrix();
     renderer.render(scene, cam);
   };
   requestAnimationFrame(frame);
