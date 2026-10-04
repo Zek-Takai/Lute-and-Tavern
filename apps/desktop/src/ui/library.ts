@@ -180,6 +180,23 @@ function cover(s: Song) {
   return noArt('cover');
 }
 
+/** An empty page whose songs are only hidden by a leftover filter (a genre, a status, search words): say
+ *  so, and offer to show them. */
+function hiddenByFilters(): string {
+  const saved = { genre: state.genre, filter: state.filter, query: state.query };
+  if (saved.genre === 'all' && saved.filter === 'all' && !saved.query.trim()) return '';
+  Object.assign(state, { genre: 'all', filter: 'all', query: '' });
+  const n = visible().length;
+  Object.assign(state, saved);
+  if (!n) return '';
+  const why = [
+    saved.genre !== 'all' ? `the genre ${esc(genresInUse().find(([k]) => k === saved.genre)?.[1].name ?? saved.genre)}` : '',
+    saved.filter !== 'all' ? 'a status filter' : '',
+    saved.query.trim() ? `the search "${esc(saved.query.trim())}"` : '',
+  ].filter(Boolean).join(' and ');
+  return `<div class="empty"><p>${n} song${n === 1 ? ' is' : 's are'} hidden by ${why}.</p><button class="btn" data-act="clearFilters">Show ${n === 1 ? 'it' : 'them'}</button></div>`;
+}
+
 export function renderGrid() {
   if (state.view.kind === 'apple') return void renderAppleGrid();
   if (state.view.kind === 'radio') return void renderRadioGrid();
@@ -191,7 +208,7 @@ export function renderGrid() {
           <div class="row" style="justify-content:center"><button class="btn" data-act="addFolder">Watch an existing music folder</button><button class="btn primary" data-act="request">Request a song</button></div></div>`
       : `<div class="empty welcome"><h2>Welcome to the tavern</h2><p>First, pick where your library lives. Songs you add are kept there, each in its own folder with its stems, cover and details.</p>
           <div class="row" style="justify-content:center"><button class="btn primary" data-act="libSuggested">Use Music › Lute &amp; Tavern</button><button class="btn" data-act="libChoose">Choose a folder…</button></div></div>`
-    : `<p class="empty">${q ? `Nothing matches "${esc(q)}". Try a title, artist, album or lyric.` : state.view.kind === 'pl' ? 'This playlist is empty. Open any song and tick this playlist under Details.' : 'No songs here yet.'}</p>`;
+    : hiddenByFilters() || `<p class="empty">${q ? `Nothing matches "${esc(q)}". Try a title, artist, album or lyric.` : state.view.kind === 'pl' ? 'This playlist is empty. Open any song and tick this playlist under Details.' : 'No songs here yet.'}</p>`;
   $('#grid').innerHTML = list.length
     ? list
         .map((s) => {
@@ -322,6 +339,8 @@ export function initLibrary(actions: { addFolder: () => void; request: () => voi
       const x = v.dataset.view!;
       state.view = x.startsWith('pl:') ? { kind: 'pl', id: Number(x.slice(3)) } : { kind: x as 'all' | 'ai' | 'library' };
       state.filter = 'all';
+      // a view picked here shows all of it: a genre picked earlier in the Genres tab doesn't carry over
+      state.genre = 'all';
     }
     if (g) {
       state.genre = g.dataset.g!;
@@ -389,6 +408,13 @@ export function initLibrary(actions: { addFolder: () => void; request: () => voi
     if (act === 'request') return actions.request();
     if (act === 'libSuggested') return actions.setupLibrary(true);
     if (act === 'libChoose') return actions.setupLibrary(false);
+    if (act === 'clearFilters') {
+      state.genre = 'all';
+      state.filter = 'all';
+      state.query = '';
+      $<HTMLInputElement>('#q').value = '';
+      return rerender();
+    }
     const p = t.closest<HTMLElement>('[data-play]');
     if (p) {
       e.stopPropagation();
