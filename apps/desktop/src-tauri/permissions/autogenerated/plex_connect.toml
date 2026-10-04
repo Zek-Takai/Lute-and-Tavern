@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-plex-connect"
+description = "Enables the plex_connect command without any pre-configured scope."
+commands.allow = ["plex_connect"]
+
+[[permission]]
+identifier = "deny-plex-connect"
+description = "Denies the plex_connect command without any pre-configured scope."
+commands.deny = ["plex_connect"]

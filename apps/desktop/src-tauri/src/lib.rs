@@ -397,6 +397,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_localhost::Builder::new(LOCALHOST_PORT).build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updates::Pending::default())
@@ -511,6 +512,9 @@ pub fn run() {
             sources::connections_list,
             sources::connection_add,
             sources::connection_remove,
+            sources::plex_login_start,
+            sources::plex_login_check,
+            sources::plex_connect,
             sources::remote_search,
             sources::remote_home,
             sources::remote_open,

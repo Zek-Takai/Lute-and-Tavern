@@ -171,16 +171,20 @@ async function loadRemote(r: Remote) {
   const name = c?.name ?? 'Server';
   if (r.mode === 'open') {
     const items = await api.remoteOpen(r.id, r.item.kind, r.item.id);
-    return r.item.kind === 'artist'
-      ? { title: r.item.name, sub: name, songs: [], groups: [{ title: 'Albums', items }] }
-      : { title: r.item.name, sub: [r.item.artist, name].filter(Boolean).join(', '), songs: items, groups: [] };
+    if (r.item.kind === 'artist') return { title: r.item.name, sub: name, songs: [], groups: [{ title: 'Albums', items }] };
+    return {
+      title: r.item.name,
+      sub: [r.item.artist, name].filter(Boolean).join(', '),
+      songs: items.filter((i) => i.kind === 'song'),
+      groups: [{ title: 'Folders', items: items.filter((i) => i.kind === 'folder') }],
+    };
   }
   const res: RemoteResults = r.mode === 'search' ? await api.remoteSearch(r.id, r.q) : await api.remoteHome(r.id);
   return {
     title: r.mode === 'search' ? `"${r.q}" on ${name}` : name,
     sub: r.mode === 'home' ? (c?.baseUrl ?? '') : '',
     songs: res.songs,
-    groups: [{ title: r.mode === 'home' ? 'Playlists' : 'Playlists', items: res.playlists }, { title: r.mode === 'home' ? 'Newest albums' : 'Albums', items: res.albums }, { title: 'Artists', items: res.artists }],
+    groups: [{ title: 'Folders', items: res.folders }, { title: 'Playlists', items: res.playlists }, { title: r.mode === 'home' ? 'Newest albums' : 'Albums', items: res.albums }, { title: 'Artists', items: res.artists }],
   };
 }
 
@@ -201,7 +205,7 @@ function remoteSongCard(it: RemoteItem, i: number) {
 
 function remoteBox(it: RemoteItem) {
   remoteItems.set(`${it.kind}:${it.id}`, it);
-  const sub = it.kind === 'artist' ? `${it.count ?? ''} albums` : it.kind === 'playlist' ? `${it.count ?? ''} songs` : [it.artist, it.year].filter(Boolean).join(', ');
+  const sub = it.kind === 'artist' ? `${it.count ?? ''} albums` : it.kind === 'playlist' ? `${it.count ?? ''} songs` : it.kind === 'folder' ? 'Folder' : [it.artist, it.year].filter(Boolean).join(', ');
   return `<article class="card" data-r-open="${esc(it.kind + ':' + it.id)}" tabindex="0" role="button" aria-label="Open ${esc(it.name)}">${cover(it.art, it.name)}
     <div class="body"><h3>${esc(it.name)}</h3><div class="meta">${esc(sub)}</div>
       <div class="foot"><span class="src src-remote">${esc(it.kind)}</span><span style="margin-right:auto"></span>
@@ -237,7 +241,7 @@ export function serversPanel() {
   return (
     connections
       .map((c) => `<button class="nav" data-remote-open="${c.id}" aria-pressed="${v.kind === 'remote' && v.id === c.id}"><span>${esc(c.name)}</span></button>`)
-      .join('') || '<p class="muted small side-empty">Connect a music server you own (Navidrome, Airsonic, Gonic, Ampache…) to play it here.</p>'
+      .join('') || '<p class="muted small side-empty">Connect music you keep elsewhere: Plex, Jellyfin or Emby, a Subsonic server (Navidrome and others) or a WebDAV folder.</p>'
   ) + '<button class="btn small" data-add-server>Add a server…</button>';
 }
 
@@ -264,6 +268,7 @@ export async function dropResults(source: string, q: string): Promise<{ title: s
     { title: 'Albums', items: r.albums.slice(0, 3).map((a) => item(a)) },
     { title: 'Artists', items: r.artists.slice(0, 3).map((a) => item(a)) },
     { title: 'Playlists', items: r.playlists.slice(0, 3).map((p) => item(p)) },
+    { title: 'Folders', items: r.folders.slice(0, 4).map((f) => item(f)) },
   ];
 }
 

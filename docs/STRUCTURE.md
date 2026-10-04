@@ -19,7 +19,8 @@ lute-and-tavern/
 │           ├── control.rs     MCP full-control tools: search, playlists, tags, playback
 │           ├── assistant.rs   in-app assistant (tool-calling chat, history) and the Whisper voice hook
 │           ├── radio.rs       internet radio via Radio Browser; saved and recent stations
-│           └── remote.rs      connections to the person's own music servers (Subsonic API)
+│           ├── remote.rs      connections to the person's own music: shared trait, storage
+│           └── remote_*.rs    one per kind: subsonic, plex (plex.tv sign-in), jellyfin (and Emby), webdav
 ├── apps/
 │   └── desktop/               THE DESKTOP FACE (Tauri 2). macOS first, then Linux and Windows.
 │       ├── index.html

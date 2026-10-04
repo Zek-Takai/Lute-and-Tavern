@@ -170,6 +170,10 @@ const MIGRATIONS: &[&str] = &[
         created_at INTEGER NOT NULL
     );
     "#,
+    // v9: per-kind connection details that aren't secret (Plex server id and addresses, Jellyfin user id...).
+    r#"
+    ALTER TABLE connections ADD COLUMN extra TEXT NOT NULL DEFAULT '{}';
+    "#,
 ];
 
 pub fn open(path: &std::path::Path) -> Result<Connection> {

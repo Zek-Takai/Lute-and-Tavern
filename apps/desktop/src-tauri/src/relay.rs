@@ -8,7 +8,8 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::Serialize;
 use std::io::Read;
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tiny_http::{Header, Request, Response, Server, StatusCode};
@@ -19,6 +20,8 @@ struct Relay {
 }
 
 static RELAY: OnceLock<Relay> = OnceLock::new();
+/// Addresses that need sign-in headers (connected servers), by short key; the page only ever sees the key.
+static TARGETS: Mutex<Option<HashMap<String, lt_core::remote::Target>>> = Mutex::new(None);
 
 pub fn start(app: &AppHandle) -> Result<(), String> {
     let server = Server::http("127.0.0.1:0").map_err(|e| format!("stream relay: {e}"))?;
@@ -45,6 +48,25 @@ pub fn base() -> String {
 
 pub fn url_for(target: &str) -> String {
     format!("{}{}", base(), URL_SAFE_NO_PAD.encode(target))
+}
+
+/// Relay address for a target that needs headers. The same target always gets the same key.
+pub fn register(t: lt_core::remote::Target) -> String {
+    if t.headers.is_empty() {
+        return url_for(&t.url);
+    }
+    let key = {
+        use md5::{Digest, Md5};
+        let mut h = Md5::new();
+        h.update(t.url.as_bytes());
+        for (k, v) in &t.headers {
+            h.update(k.as_bytes());
+            h.update(v.as_bytes());
+        }
+        format!("{:x}", h.finalize())
+    };
+    TARGETS.lock().unwrap().get_or_insert_with(HashMap::new).insert(key.clone(), t);
+    format!("{}k/{key}", base())
 }
 
 #[tauri::command]
@@ -77,7 +99,17 @@ fn serve(app: &AppHandle, req: Request) {
     if secret.len() != relay.secret.len() || secret.bytes().zip(relay.secret.bytes()).fold(0u8, |a, (x, y)| a | (x ^ y)) != 0 {
         return fail(req, 403, "forbidden");
     }
-    let Some(target) = URL_SAFE_NO_PAD.decode(enc).ok().and_then(|b| String::from_utf8(b).ok()) else { return fail(req, 400, "bad address") };
+    let (target, extra_headers) = if let Some(key) = enc.strip_prefix("k/") {
+        match TARGETS.lock().unwrap().as_ref().and_then(|m| m.get(key).cloned()) {
+            Some(t) => (t.url, t.headers),
+            None => return fail(req, 404, "unknown stream"),
+        }
+    } else {
+        match URL_SAFE_NO_PAD.decode(enc).ok().and_then(|b| String::from_utf8(b).ok()) {
+            Some(t) => (t, vec![]),
+            None => return fail(req, 400, "bad address"),
+        }
+    };
     let Ok(url) = reqwest::Url::parse(&target) else { return fail(req, 400, "bad address") };
     if !matches!(url.scheme(), "http" | "https") {
         return fail(req, 400, "only http(s) streams");
@@ -87,6 +119,9 @@ fn serve(app: &AppHandle, req: Request) {
         Err(e) => return fail(req, 502, &e.to_string()),
     };
     let mut up = client.get(url.clone());
+    for (k, v) in &extra_headers {
+        up = up.header(k.as_str(), v.as_str());
+    }
     if let Some(r) = req.headers().iter().find(|h| h.field.equiv("Range")) {
         up = up.header("Range", r.value.as_str());
     }

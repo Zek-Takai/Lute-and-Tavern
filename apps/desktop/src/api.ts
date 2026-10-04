@@ -46,8 +46,9 @@ export interface SpeechSettings { baseUrl: string; model: string; language: stri
 export interface Station { uuid: string; name: string; url: string; homepage: string; favicon: string; country: string; tags: string; codec: string; bitrate: number; favorite: boolean }
 export interface RadioHome { favorites: Station[]; recent: Station[]; top: Station[]; tags: string[] }
 export interface Connection { id: number; kind: string; name: string; baseUrl: string; username: string }
-export interface RemoteItem { id: string; kind: 'song' | 'album' | 'artist' | 'playlist'; name: string; artist: string; album: string; year: string; genre: string; cover: string | null; duration: number | null; track: number | null; count: number | null; art: string | null }
-export interface RemoteResults { songs: RemoteItem[]; albums: RemoteItem[]; artists: RemoteItem[]; playlists: RemoteItem[] }
+export interface RemoteItem { id: string; kind: 'song' | 'album' | 'artist' | 'playlist' | 'folder'; name: string; artist: string; album: string; year: string; genre: string; cover: string | null; duration: number | null; track: number | null; count: number | null; art: string | null }
+export interface RemoteResults { songs: RemoteItem[]; albums: RemoteItem[]; artists: RemoteItem[]; playlists: RemoteItem[]; folders: RemoteItem[] }
+export interface PlexServer { name: string; machine: string; uris: string[]; owned: boolean }
 export interface McpInfo { enabled: boolean; running: boolean; url: string; error: string | null }
 export interface Take { id: number; name: string; origin: string; addedAt: number; versionId: number | null }
 export interface Version { id: number; label: string; note: string; createdAt: number }
@@ -117,6 +118,9 @@ export const api = {
   connections: () => invoke<Connection[]>('connections_list'),
   connectionAdd: (kind: string, name: string, url: string, username: string, password: string) => invoke<string>('connection_add', { kind, name, url, username, password }),
   connectionRemove: (id: number) => invoke<void>('connection_remove', { id }),
+  plexLoginStart: () => invoke<number>('plex_login_start'),
+  plexLoginCheck: (pin: number) => invoke<PlexServer[] | null>('plex_login_check', { pin }),
+  plexConnect: (machine: string) => invoke<string>('plex_connect', { machine }),
   remoteSearch: (id: number, query: string) => invoke<RemoteResults>('remote_search', { id, query }),
   remoteHome: (id: number) => invoke<RemoteResults>('remote_home', { id }),
   remoteOpen: (id: number, kind: string, item: string) => invoke<RemoteItem[]>('remote_open', { id, kind, item }),

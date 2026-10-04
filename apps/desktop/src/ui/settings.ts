@@ -1,7 +1,7 @@
 // Settings: the songwriter connection, music folders, genre tags and the sidebar's starting tab.
 import { audioDir, join } from '@tauri-apps/api/path';
 import { message, open as pickFolder } from '@tauri-apps/plugin-dialog';
-import { api, errText, type McpInfo, type SpeechSettings, type UpdateInfo } from '../api';
+import { api, errText, type McpInfo, type PlexServer, type SpeechSettings, type UpdateInfo } from '../api';
 import { comboOf, DEFAULT_KEYS, keyLabel } from './assistant';
 import { connections, loadConnections } from './sources';
 import { applyLineColor, applySkin, LINE_COLORS, SKINS } from '../player';
@@ -31,6 +31,14 @@ export async function addMusicFolder() {
 
 let updates: UpdateInfo = { canUpdate: false, currentVersion: '', defaultUrl: '' };
 let speech: SpeechSettings = { baseUrl: '', model: '', language: '', hasKey: false };
+const KIND_NAME: Record<string, string> = { plex: 'Plex', jellyfin: 'Jellyfin or Emby', subsonic: 'Subsonic server (Navidrome, Airsonic, Gonic, Ampache…)', webdav: 'WebDAV folder (Nextcloud, NAS file sharing…)' };
+const KIND_HELP: Record<string, string> = {
+  plex: 'Sign in with your Plex account in the browser; the app finds your Plex servers and you pick one. Nothing to install.',
+  jellyfin: 'Your Jellyfin or Emby address and account. The app signs in once and keeps only the access token, not your password.',
+  subsonic: 'For servers that speak the Subsonic API. The server only ever receives a one-time token, never your password.',
+  webdav: 'A music folder shared over WebDAV, played as it is. Folders in the Lute & Tavern layout show their artists and albums.',
+};
+let addKind = 'plex';
 let mcp: McpInfo = { enabled: false, running: false, url: '', error: null };
 let apple: AppleStatus = { ready: false, builtIn: false, keyId: '', teamId: '' };
 
@@ -201,16 +209,22 @@ function render() {
 
     <section class="set-sec" id="setServers">
       <h3>Your music servers</h3>
-      <p class="muted small">Play music you keep elsewhere: a server on a device you own (a NAS or home computer) or a cloud server you run. Anything that speaks the Subsonic API works: Navidrome, Airsonic, Gonic, Ampache, Funkwhale and many NAS music apps. It's just an address, so it works at home, over the internet or through a VPN. Your password is kept in the system keychain; the server only ever receives a one-time token.</p>
-      <ul class="set-list">${connections.map((c) => `<li><span><b>${esc(c.name)}</b> <span class="muted small">${esc(c.username)} at ${esc(c.baseUrl)}</span></span><button class="btn small" data-rm-conn="${c.id}">Remove</button></li>`).join('') || '<li class="muted">None yet.</li>'}</ul>
+      <p class="muted small">Play music you keep elsewhere: a server on a device you own (a NAS or home computer) or a cloud server you run. It's just an address, so it works at home, over the internet or through a VPN. Sign-ins are kept in the system keychain.</p>
+      <ul class="set-list">${connections.map((c) => `<li><span><b>${esc(c.name)}</b> <span class="muted small">${esc(KIND_NAME[c.kind] ?? c.kind)}, ${esc(c.baseUrl)}</span></span><button class="btn small" data-rm-conn="${c.id}">Remove</button></li>`).join('') || '<li class="muted">None yet.</li>'}</ul>
       <div class="form">
-        <label for="cKind">Kind</label><select id="cKind"><option value="subsonic">Subsonic-compatible server</option></select>
+        <label for="cKind">Kind</label><select id="cKind">${Object.entries(KIND_NAME).map(([k, l]) => `<option value="${k}" ${k === addKind ? 'selected' : ''}>${l}</option>`).join('')}</select>
+      </div>
+      <p class="muted small">${KIND_HELP[addKind]}</p>
+      ${addKind === 'plex'
+        ? `<div class="row"><button class="btn primary" id="cPlex">Sign in with Plex</button><span class="muted small" id="cStatus"></span></div>
+           <div id="cPlexServers"></div>`
+        : `<div class="form">
         <label for="cName">Name</label><input id="cName" placeholder="Home NAS">
-        <label for="cUrl">Address</label><input id="cUrl" placeholder="http://192.168.1.20:4533 or https://music.example.com">
+        <label for="cUrl">Address</label><input id="cUrl" placeholder="${addKind === 'webdav' ? 'https://nas.local:5006/music' : addKind === 'jellyfin' ? 'http://192.168.1.20:8096' : 'http://192.168.1.20:4533'}">
         <label for="cUser">Username</label><input id="cUser" autocomplete="off">
         <label for="cPass">Password</label><input id="cPass" type="password" autocomplete="off">
       </div>
-      <div class="row"><button class="btn primary" id="cAdd">Connect</button><span class="muted small" id="cStatus"></span></div>
+      <div class="row"><button class="btn primary" id="cAdd">Connect</button><span class="muted small" id="cStatus"></span></div>`}
     </section>
 
     <section class="set-sec">
@@ -432,7 +446,43 @@ function render() {
     render();
     toast('Key removed from your keychain');
   });
-  $('#cAdd').onclick = async () => {
+  $<HTMLSelectElement>('#cKind').onchange = (e) => {
+    addKind = (e.target as HTMLSelectElement).value;
+    render();
+    $('#cKind').focus();
+  };
+  document.getElementById('cPlex')?.addEventListener('click', async () => {
+    const st = (t: string) => ($('#cStatus').textContent = t);
+    try {
+      const pin = await api.plexLoginStart();
+      st('Finish signing in to Plex in your browser…');
+      let servers: PlexServer[] | null = null;
+      for (let i = 0; i < 150 && !servers; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        if (!document.getElementById('cStatus')) return; // Settings closed
+        servers = await api.plexLoginCheck(pin);
+      }
+      if (!servers) return st('Plex sign-in timed out. Try again.');
+      if (!servers.length) return st('No Plex servers on that account.');
+      const connect = async (machine: string) => {
+        st('Connecting…');
+        try {
+          toast(await api.plexConnect(machine));
+          await loadConnections();
+          render();
+        } catch (e) {
+          st(errText(e));
+        }
+      };
+      if (servers.length === 1) return void connect(servers[0].machine);
+      st('Pick your server:');
+      $('#cPlexServers').innerHTML = `<ul class="set-list">${servers.map((sv) => `<li><span><b>${esc(sv.name)}</b> <span class="muted small">${sv.owned ? 'yours' : 'shared with you'}</span></span><button class="btn small" data-plex="${esc(sv.machine)}">Connect</button></li>`).join('')}</ul>`;
+      $('#cPlexServers').querySelectorAll<HTMLElement>('[data-plex]').forEach((b) => (b.onclick = () => void connect(b.dataset.plex!)));
+    } catch (e) {
+      st(errText(e));
+    }
+  });
+  document.getElementById('cAdd')?.addEventListener('click', async () => {
     const v = (id: string) => $<HTMLInputElement>(id).value;
     const st = (t: string) => ($('#cStatus').textContent = t);
     st('Checking the server…');
@@ -444,7 +494,7 @@ function render() {
     } catch (e) {
       st(errText(e));
     }
-  };
+  });
   document.querySelectorAll<HTMLElement>('[data-rm-conn]').forEach((b) => (b.onclick = async () => {
     await api.connectionRemove(Number(b.dataset.rmConn)).catch((e) => toast(errText(e)));
     await loadConnections();

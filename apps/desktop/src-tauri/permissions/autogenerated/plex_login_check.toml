@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-plex-login-check"
+description = "Enables the plex_login_check command without any pre-configured scope."
+commands.allow = ["plex_login_check"]
+
+[[permission]]
+identifier = "deny-plex-login-check"
+description = "Denies the plex_login_check command without any pre-configured scope."
+commands.deny = ["plex_login_check"]

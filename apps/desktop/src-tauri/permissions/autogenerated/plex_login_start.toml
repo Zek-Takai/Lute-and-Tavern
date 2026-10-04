@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-plex-login-start"
+description = "Enables the plex_login_start command without any pre-configured scope."
+commands.allow = ["plex_login_start"]
+
+[[permission]]
+identifier = "deny-plex-login-start"
+description = "Denies the plex_login_start command without any pre-configured scope."
+commands.deny = ["plex_login_start"]
