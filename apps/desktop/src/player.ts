@@ -3,6 +3,7 @@
 import { api, lt, type Song, type Stem } from './api';
 import { applePause, applePosition, appleResume, appleSeek, appleStop, artUrl, playApple } from './apple';
 import { BEATS, IDX, SCALE, keyName } from './music/notation';
+import { preloadShow } from './shows';
 import { byId, playable, saveSetting, setting, viewName, type Repeat } from './state';
 import { $, cssUrl, esc, hueOf, PAUSE, PLAY, toast } from './util';
 
@@ -118,7 +119,10 @@ function deckTick() {
   }
   if (standby && standby.song !== next) clearStandby();
   const left = (Number.isFinite(media.duration) ? media.duration : Infinity) - media.currentTime;
-  if (!standby && left <= PRELOAD_SECS + crossfade) void prepareNext(next);
+  if (!standby && left <= PRELOAD_SECS + crossfade) {
+    void prepareNext(next);
+    preloadShow(next.id);
+  }
   if (standby?.ready && crossfade > 0 && !standby.fading && left <= crossfade) {
     // both play for a moment: the old one fades out as the new one fades in
     const t = ac!.currentTime, d = Math.max(0.2, left);

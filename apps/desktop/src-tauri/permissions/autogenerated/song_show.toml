@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-song-show"
+description = "Enables the song_show command without any pre-configured scope."
+commands.allow = ["song_show"]
+
+[[permission]]
+identifier = "deny-song-show"
+description = "Denies the song_show command without any pre-configured scope."
+commands.deny = ["song_show"]

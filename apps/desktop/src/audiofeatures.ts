@@ -7,10 +7,13 @@
 //   intensity          the section: quiet verse low, big chorus high (loudness over a few seconds vs the song)
 //   rise               the music is building up
 // When a song plays as stems, the vocals, drums and bass parts are heard separately, so those are exact.
-import { audioGraph, playing, stemTaps } from './player';
+import { audioGraph, playing, position, stemTaps } from './player';
+import { envAt, hitBetween, hitsIn, pitchAt, sectionAt, showForSong, singingAt, type Show } from './shows';
 
 export interface Features { kick: number; snare: number; hat: number; bass: number; body: number; air: number; vocal: number; pitch: number; intensity: number; rise: number; level: number }
 export const features: Features = { kick: 0, snare: 0, hat: 0, bass: 0, body: 0, air: 0, vocal: 0, pitch: 0.5, intensity: 0.5, rise: 0, level: 0 };
+/** Every hit so far, counted, so a scene never misses one however fast they come. */
+export const hitCount = { kick: 0, snare: 0, hat: 0 };
 
 const FFT = 2048;
 let built: AudioContext | null = null;
@@ -154,12 +157,48 @@ function syncStems(ac: AudioContext) {
   }
 }
 
+// With a show: the song's own timeline, read at its playback position (exact, and nothing to guess).
+let showT = -1;
+const LEAD = 0.03; // a hit shows a frame early, so it lands on the beat rather than just after it
+
+function fromShow(s: Show, dt: number) {
+  const t = position().cur + LEAD;
+  // a jump (seeking, a new start) mustn't fire every hit in between
+  if (showT < 0 || t < showT || t - showT > 0.5) showT = t;
+  const ease = (k: keyof Features, v: number, up: number, down: number) => { features[k] += (v - features[k]) * Math.min(1, dt * (v > features[k] ? up : down)); };
+  // each song's own cut-off and strong-hit level (shows.ts), so quiet and loud songs both show their beat
+  const c = s.cut!;
+  const rel = (x: number, top: number) => Math.min(1, x / top);
+  const k = hitBetween(s.hits.kick, showT, t, c.kick.min), sn = hitBetween(s.hits.snare, showT, t, c.snare.min), h = hitBetween(s.hits.hat, showT, t, c.hat.min);
+  if (k) { features.kick = Math.max(features.kick, 0.6 + 0.4 * rel(k, c.kick.top)); hitCount.kick++; }
+  if (sn) { features.snare = Math.max(features.snare, 0.6 + 0.4 * rel(sn, c.snare.top)); hitCount.snare++; }
+  if (h) { features.hat = Math.max(features.hat, 0.5 + 0.3 * rel(h, c.hat.top)); hitCount.hat++; }
+  showT = t;
+  ease('bass', envAt(s.bass.env, t), 12, 3);
+  ease('body', envAt(s.other.env, t), 8, 2.5);
+  ease('air', Math.min(1, hitsIn(s.hits.hat, t - 0.5, t) / 4), 6, 2);
+  ease('level', envAt(s.mix.env, t), 14, 4);
+  ease('vocal', envAt(s.vocal.env, t) * (singingAt(s, t) ? 1 : 0.25), 6, 1.6);
+  const p = pitchAt(s, t);
+  if (p !== null) ease('pitch', p, 4, 4);
+  ease('intensity', sectionAt(s, t)?.energy ?? 0.4, 1.2, 0.8);
+  const now = envAt(s.mix.env, t), before = envAt(s.mix.env, t - 2);
+  ease('rise', Math.max(0, Math.min(1, (now - before) * 2.5)), 2, 0.6);
+}
+
 /** Updates `features` for this frame. Returns false when nothing plays (the visualizer then rests). */
 export function listen(dt: number): boolean {
   const live = !!playing && playing.kind !== 'apple' && build();
   const ease = (k: keyof Features, v: number, up: number, down: number) => { features[k] += (v - features[k]) * Math.min(1, dt * (v > features[k] ? up : down)); };
   const decay = (k: 'kick' | 'snare' | 'hat', rate: number) => { features[k] *= Math.exp(-dt * rate); };
   decay('kick', 5); decay('snare', 6); decay('hat', 10);
+  // a song with a show follows it (even Apple Music songs would, if they had one)
+  const show = playing && playing.kind !== 'synth' ? showForSong(Number(playing.id)) : null;
+  if (show) {
+    fromShow(show, dt);
+    return true;
+  }
+  showT = -1;
   if (!live) {
     for (const k of ['bass', 'body', 'air', 'vocal', 'level', 'rise'] as const) ease(k, 0, 1, 1.5);
     ease('intensity', 0.3, 1, 0.5);
@@ -184,9 +223,9 @@ export function listen(dt: number): boolean {
   // the drums: from the drums stem when there is one, otherwise from the whole mix
   const drums = stemFor(/drum|perc|beat/);
   const dSrc = drums ? (drums.prev.set(drums.buf), drums.an.getFloatFrequencyData(drums.buf), drums) : { buf: mid, prev };
-  if (O.kick.hit(flux(dSrc.buf, dSrc.prev, 35, 130), dt)) features.kick = 1;
-  if (O.snare.hit(flux(dSrc.buf, dSrc.prev, 1200, 5000) + flux(dSrc.buf, dSrc.prev, 150, 280) * 0.5, dt)) features.snare = 1;
-  if (O.hat.hit(flux(dSrc.buf, dSrc.prev, 7000, 15000), dt)) features.hat = Math.max(features.hat, 0.8);
+  if (O.kick.hit(flux(dSrc.buf, dSrc.prev, 35, 130), dt)) { features.kick = 1; hitCount.kick++; }
+  if (O.snare.hit(flux(dSrc.buf, dSrc.prev, 1200, 5000) + flux(dSrc.buf, dSrc.prev, 150, 280) * 0.5, dt)) { features.snare = 1; hitCount.snare++; }
+  if (O.hat.hit(flux(dSrc.buf, dSrc.prev, 7000, 15000), dt)) { features.hat = Math.max(features.hat, 0.8); hitCount.hat++; }
 
   const bassStem = stemFor(/bass/);
   if (bassStem) bassStem.an.getFloatFrequencyData(bassStem.buf);

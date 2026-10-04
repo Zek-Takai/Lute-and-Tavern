@@ -1,0 +1,13 @@
+# torch with CUDA is installed first from the PyTorch index (see setup.sh); demucs without its pinned deps
+librosa==0.11.0
+soundfile
+soxr
+numpy
+scipy
+imageio-ffmpeg
+einops
+julius
+openunmix
+dora-search
+pyyaml
+tqdm

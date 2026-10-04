@@ -12,6 +12,7 @@ mod sources;
 mod sync;
 mod ui_server;
 mod secure;
+mod shows;
 mod updates;
 mod watch;
 mod writer;
@@ -581,6 +582,7 @@ pub fn run() {
             musickit::musickit_token,
             save_external_song,
             set_song_written,
+            shows::song_show,
             reveal_song,
             pull_apple_library,
             add_apple_to_playlist,

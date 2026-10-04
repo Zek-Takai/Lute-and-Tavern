@@ -1,7 +1,7 @@
 // The background visualizer: listens to the music once (audiofeatures.ts) and runs the chosen scene
 // (src/viz). Settings › Visualizer picks one, a different one for every song, or none.
 import * as THREE from 'three';
-import { features, listen } from './audiofeatures';
+import { features, hitCount, listen } from './audiofeatures';
 import { playing } from './player';
 import { state } from './state';
 import { makeAurora } from './viz/aurora';
@@ -73,7 +73,7 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
   size();
   applyVisualizer();
 
-  const prevHit = { kick: 0, snare: 0, hat: 0 };
+  const seen = { ...hitCount };
   let last = performance.now(), time = 0, listenFailed = false;
   const frame = (now: number) => {
     requestAnimationFrame(frame);
@@ -99,8 +99,8 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
     }
     const f = features;
     const rose = (k: 'kick' | 'snare' | 'hat') => {
-      const r = f[k] > prevHit[k] + 0.4;
-      prevHit[k] = f[k];
+      const r = hitCount[k] !== seen[k];
+      seen[k] = hitCount[k];
       return r;
     };
     const hit = { kick: rose('kick'), snare: rose('snare'), hat: rose('hat') };
