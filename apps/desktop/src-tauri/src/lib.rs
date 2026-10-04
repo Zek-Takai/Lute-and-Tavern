@@ -10,6 +10,7 @@ mod protocol;
 mod relay;
 mod sources;
 mod sync;
+mod ui_server;
 mod secure;
 mod updates;
 mod watch;
@@ -112,7 +113,16 @@ async fn rescan(state: State<'_, AppState>) -> Res<ScanReport> {
     blocking(&state, |l| {
         let mut total = ScanReport::default();
         for f in l.folders()? {
-            let r = l.scan_folder(&f)?;
+            // an offline folder doesn't stop the others
+            let r = match l.scan_folder(&f) {
+                Ok(r) => r,
+                Err(e) if !std::path::Path::new(&f.path).is_dir() => {
+                    log::write("warn", &format!("{e:#}"));
+                    total.unreachable.push(f.path.clone());
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
             total.added += r.added;
             total.updated += r.updated;
             total.removed += r.removed;
@@ -340,7 +350,7 @@ fn main_window(app: &tauri::App) -> tauri::Result<()> {
     let handle = app.handle().clone();
     // Apple's sign-in only answers pages served over http(s). Development already runs on the Vite server;
     // installed builds serve the interface from localhost (see LOCALHOST_PORT) instead of tauri://.
-    let url = if cfg!(debug_assertions) {
+    let url = if cfg!(debug_assertions) || !ui_server::start(app.handle(), LOCALHOST_PORT) {
         tauri::WebviewUrl::App("index.html".into())
     } else {
         tauri::WebviewUrl::External(format!("http://localhost:{LOCALHOST_PORT}").parse().expect("static url"))
@@ -425,7 +435,6 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_localhost::Builder::new(LOCALHOST_PORT).build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updates::Pending::default())
         .manage(musickit::TokenCache::default())
@@ -454,7 +463,23 @@ pub fn run() {
             }
             let dir = app.path().app_data_dir()?;
             log::init(&dir);
-            let lib = Arc::new(Library::open(&dir)?);
+            let lib = match Library::open(&dir) {
+                Ok(l) => Arc::new(l),
+                Err(e) => {
+                    // A locked, damaged or newer-version database: say so instead of vanishing.
+                    use tauri_plugin_dialog::DialogExt;
+                    log::write("error", &format!("Could not open the library: {e:#}"));
+                    app.dialog()
+                        .message(format!(
+                            "Lute & Tavern couldn't open its library.\n\n{e:#}\n\nIts data is in:\n{}\n\nIf another copy of the app is open, close it and try again. If the problem stays, move library.db out of that folder (keep it as a backup) and start the app again to begin with a fresh library.",
+                            dir.display()
+                        ))
+                        .title("Lute & Tavern")
+                        .kind(tauri_plugin_dialog::MessageDialogKind::Error)
+                        .blocking_show();
+                    std::process::exit(1);
+                }
+            };
             app.manage(AppState { lib, watcher: watch::Watcher::default() });
             if app.state::<AppState>().lib.setting_bool("mcpEnabled") {
                 if let Err(e) = mcp::start(app.handle()) {
@@ -544,6 +569,7 @@ pub fn run() {
             sources::radio_search,
             sources::radio_home,
             sources::radio_favorite,
+            sources::radio_favorites,
             sources::radio_play,
             sources::connections_list,
             sources::connection_add,

@@ -49,26 +49,41 @@ fn setting_i64(state: &AppState, k: &str) -> Option<i64> {
     state.lib.settings().ok().and_then(|m| m.get(k).and_then(Value::as_i64))
 }
 
+/// The chosen time on a date, in local time. A time skipped by a clock change (e.g. 02:30 on the spring
+/// change) becomes the first time after it.
+fn at_local(date: chrono::NaiveDate, t: NaiveTime) -> Option<chrono::DateTime<Local>> {
+    (0..=2).find_map(|h| Local.from_local_datetime(&date.and_time(t + CDuration::hours(h))).earliest())
+}
+
+/// Days of the schedule, counted on the calendar (not in 24 h steps, which drift an hour across clock changes).
+fn slot_dates(s: &Schedule, today: chrono::NaiveDate) -> Option<(chrono::NaiveDate, i64)> {
+    match s.mode.as_str() {
+        "daily" => Some((today, 1)),
+        "weekly" => {
+            let back = (7 + today.weekday().num_days_from_sunday() as i64 - s.day as i64) % 7;
+            Some((today - CDuration::days(back), 7))
+        }
+        _ => None,
+    }
+}
+
 /// The latest scheduled moment at or before now (local time), if the schedule has one.
 fn last_slot(s: &Schedule) -> Option<i64> {
     let t = NaiveTime::parse_from_str(&s.time, "%H:%M").ok()?;
     let now = Local::now();
-    let today = Local.from_local_datetime(&now.date_naive().and_time(t)).earliest()?;
-    let slot = match s.mode.as_str() {
-        "daily" => if today <= now { today } else { today - CDuration::days(1) },
-        "weekly" => {
-            let back = (7 + now.weekday().num_days_from_sunday() as i64 - s.day as i64) % 7;
-            let cand = today - CDuration::days(back);
-            if cand <= now { cand } else { cand - CDuration::days(7) }
-        }
-        _ => return None,
-    };
+    let (date, step) = slot_dates(s, now.date_naive())?;
+    let cand = at_local(date, t)?;
+    let slot = if cand <= now { cand } else { at_local(date - CDuration::days(step), t)? };
     Some(slot.timestamp())
 }
 
 fn next_slot(s: &Schedule) -> Option<i64> {
-    let last = last_slot(s)?;
-    Some(last + if s.mode == "daily" { 86400 } else { 7 * 86400 })
+    let t = NaiveTime::parse_from_str(&s.time, "%H:%M").ok()?;
+    let now = Local::now();
+    let (date, step) = slot_dates(s, now.date_naive())?;
+    let cand = at_local(date, t)?;
+    let next = if cand > now { cand } else { at_local(date + CDuration::days(step), t)? };
+    Some(next.timestamp())
 }
 
 fn info(state: &AppState) -> BackupSettings {
@@ -98,6 +113,13 @@ pub fn set_backup_settings(state: State<'_, AppState>, conn: Option<i64>, folder
         }
     }
     let l = &state.lib;
+    let folder_was = l.setting_str("backupFolder").unwrap_or_else(|| "Music/Lute & Tavern".into());
+    if let Some(id) = conn
+        && (setting_i64(&state, "backupConn") != Some(id) || folder_was != folder.trim().trim_matches('/'))
+    {
+        // a new place: everything is sent there, not skipped as "already backed up"
+        l.reset_backup_manifest(id).map_err(|e| e.to_string())?;
+    }
     l.set_setting("backupConn", &conn.map(Value::from).unwrap_or(Value::Null)).map_err(|e| e.to_string())?;
     l.set_setting("backupFolder", &Value::String(folder.trim().trim_matches('/').to_string())).map_err(|e| e.to_string())?;
     l.set_setting("backupSchedule", &serde_json::to_value(&schedule).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
@@ -150,6 +172,7 @@ pub fn start(app: &AppHandle) -> Result<(), String> {
                 let _ = crate::playlists::sync_now(&app);
             }
             Err(e) => {
+                let _ = state.lib.set_setting("backupLastAttempt", &Value::from(now));
                 let msg = format!("Backup failed: {e:#}");
                 crate::log::write("error", &msg);
                 let _ = state.lib.set_setting("backupLastReport", &json!({"ok": false, "message": msg}));
@@ -173,10 +196,15 @@ pub fn start_scheduler(app: &AppHandle) {
         loop {
             let state = app.state::<AppState>();
             let s = schedule(&state);
-            if s.mode != "manual" && setting_i64(&state, "backupConn").is_some() {
+            // A connection that was removed stops the schedule; a failed run is retried every 30 minutes,
+            // not every minute.
+            let conn_ok = setting_i64(&state, "backupConn").is_some_and(|id| state.lib.connection(id).is_ok());
+            if s.mode != "manual" && conn_ok {
                 if let Some(slot) = last_slot(&s) {
                     let last = setting_i64(&state, "backupLast").unwrap_or(0);
-                    if last < slot && !RUNNING.load(Ordering::SeqCst) {
+                    let tried = setting_i64(&state, "backupLastAttempt").unwrap_or(0);
+                    let backing_off = tried >= slot && chrono::Utc::now().timestamp() - tried < 30 * 60;
+                    if last < slot && !backing_off && !RUNNING.load(Ordering::SeqCst) {
                         let _ = start(&app);
                     }
                 }

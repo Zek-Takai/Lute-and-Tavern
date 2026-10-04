@@ -5,7 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { api, errText, type Connection, type RemoteItem, type RemoteResults, type Song, type Station } from '../api';
 import { aiHooks, playSong, setNowSub, streamSources } from '../player';
 import { rerender, state } from '../state';
-import { $, esc, hueOf, PLAY, toast } from '../util';
+import { $, cssUrl, esc, hueOf, PLAY, toast } from '../util';
 import { openSettings } from './settings';
 
 // ---------- shared ----------
@@ -46,7 +46,7 @@ function external(p: Partial<Song> & Pick<Song, 'id' | 'title' | 'provider' | 'p
 }
 
 const cover = (art: string | null, title: string) => {
-  if (art) return `<div class="cover" style="background-image:url('${esc(art)}')"></div>`;
+  if (art) return `<div class="cover" style="background-image:${esc(cssUrl(art))}"></div>`;
   const h = hueOf(title);
   return `<div class="cover" style="background-image:linear-gradient(135deg,hsl(${h} 55% 38%),hsl(${(h + 50) % 360} 60% 18%))">${esc((title[0] || '♪').toUpperCase())}</div>`;
 };
@@ -64,7 +64,11 @@ export const playStation = (st: Station) => playSong(stationSong(st), [stationSo
 type RadioMode = { mode: 'home' } | { mode: 'search'; q: string } | { mode: 'tag'; tag: string };
 let radio: RadioMode = { mode: 'home' };
 let radioData: { title: string; groups: { title: string; list: Station[] }[]; tags: string[] } | null = null;
-let radioBusy = false;
+/** The radio page being loaded, so a rerender mid-load doesn't start it twice. */
+let radioLoading: RadioMode | null = null;
+/** The person's saved stations for the side panel: read once, then kept up to date as hearts are toggled. */
+let favStations: Station[] | null = null;
+let favLoad: Promise<Station[]> | null = null;
 
 /** Opens Radio where the person left it; the first time after launch that is Radio home. */
 export function openRadio() {
@@ -92,6 +96,7 @@ export function showRadio(m: RadioMode = { mode: 'home' }) {
 async function loadRadio() {
   if (radio.mode === 'home') {
     const h = await api.radioHome();
+    favStations = h.favorites;
     return { title: 'Radio', tags: h.tags.slice(0, 30), groups: [{ title: 'Your stations', list: h.favorites }, { title: 'Recently played', list: h.recent }, { title: 'Popular around the world', list: h.top }] };
   }
   const list = radio.mode === 'search' ? await api.radioSearch(radio.q) : await api.radioSearch('', radio.tag);
@@ -115,17 +120,22 @@ export function radioHead() {
 export async function renderRadioGrid() {
   const grid = $('#grid');
   if (!radioData) {
-    if (radioBusy) return;
-    radioBusy = true;
     grid.innerHTML = '<p class="empty">Tuning in…</p>';
+    if (radioLoading === radio) return;
+    const want = (radioLoading = radio);
+    let data: Awaited<ReturnType<typeof loadRadio>>;
     try {
-      radioData = await loadRadio();
+      data = await loadRadio();
     } catch (e) {
-      grid.innerHTML = `<p class="empty">The radio directory could not be reached: ${esc(errText(e))}</p>`;
+      if (radio !== want) return;
+      radioLoading = null;
+      if (state.view.kind === 'radio') grid.innerHTML = `<p class="empty">The radio directory could not be reached: ${esc(errText(e))}</p>`;
       return;
-    } finally {
-      radioBusy = false;
     }
+    // The person searched or opened another genre meanwhile: that page has its own load.
+    if (radio !== want) return;
+    radioLoading = null;
+    radioData = data;
     rerender();
     return;
   }
@@ -139,7 +149,9 @@ export async function renderRadioGrid() {
 }
 
 export async function radioPanel() {
-  const favs = await api.radioHome().then((h) => h.favorites).catch(() => [] as Station[]);
+  // Read from the app once; later redraws use the kept list (radio home also asks the directory, which can be slow).
+  favLoad ??= api.radioFavorites().then((f) => (favStations ??= f)).catch(() => [] as Station[]).finally(() => (favLoad = null));
+  const favs = favStations ?? (await favLoad);
   favs.forEach((s) => stations.set(s.uuid, s));
   const on = state.view.kind === 'radio';
   return `<button class="nav" data-radio-home aria-pressed="${on && radio.mode === 'home'}"><span>Radio home</span></button>
@@ -153,7 +165,8 @@ export async function radioPanel() {
 type Remote = { id: number; mode: 'home' } | { id: number; mode: 'search'; q: string } | { id: number; mode: 'open'; item: RemoteItem };
 let remote: Remote | null = null;
 let remoteData: { title: string; sub: string; songs: RemoteItem[]; groups: { title: string; items: RemoteItem[] }[] } | null = null;
-let remoteBusy = false;
+/** The server page being loaded, so a rerender mid-load doesn't start it twice. */
+let remoteLoading: Remote | null = null;
 const remoteItems = new Map<string, RemoteItem>();
 
 const conn = (id: number) => connections.find((c) => c.id === id);
@@ -233,17 +246,22 @@ export async function renderRemoteGrid() {
   const grid = $('#grid');
   if (!remote) return;
   if (!remoteData) {
-    if (remoteBusy) return;
-    remoteBusy = true;
     grid.innerHTML = '<p class="empty">Loading from your server…</p>';
+    if (remoteLoading === remote) return;
+    const want = (remoteLoading = remote);
+    let data: Awaited<ReturnType<typeof loadRemote>>;
     try {
-      remoteData = await loadRemote(remote);
+      data = await loadRemote(want);
     } catch (e) {
-      grid.innerHTML = `<p class="empty">${esc(errText(e))}</p>`;
+      if (remote !== want) return;
+      remoteLoading = null;
+      if (state.view.kind === 'remote') grid.innerHTML = `<p class="empty">${esc(errText(e))}</p>`;
       return;
-    } finally {
-      remoteBusy = false;
     }
+    // Another server or page was opened meanwhile: these items belong to the old one, so they are dropped.
+    if (remote !== want) return;
+    remoteLoading = null;
+    remoteData = data;
     rerender();
     return;
   }
@@ -357,8 +375,13 @@ export async function initSources() {
       if (play && stations.get(play)) playStation(stations.get(play)!);
       if (fav && stations.get(fav)) {
         const st = stations.get(fav)!;
+        try {
+          await api.radioFavorite({ ...st, favorite: !st.favorite }, !st.favorite);
+        } catch (err) {
+          return toast(errText(err));
+        }
         st.favorite = !st.favorite;
-        await api.radioFavorite(st, st.favorite).catch((err) => toast(errText(err)));
+        if (favStations) favStations = st.favorite ? [...favStations.filter((x) => x.uuid !== st.uuid), st] : favStations.filter((x) => x.uuid !== st.uuid);
         toast(st.favorite ? `${st.name} saved to your stations` : `${st.name} removed from your stations`);
         rerender();
       }

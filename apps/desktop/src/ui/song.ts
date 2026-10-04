@@ -4,7 +4,7 @@ import { api, errText, lt, type SongDetail } from '../api';
 import { keyName } from '../music/notation';
 import { pickStems, playing, playSong, playStems, playTake, setStemMix, stemMix, stop, syncIcons } from '../player';
 import { byId, playable, reload, rerender, saveSetting, state, visible, writerName } from '../state';
-import { $, contextMenu, copyText, date, esc, PLAY, toast } from '../util';
+import { $, contextMenu, copyText, cssUrl, date, esc, PLAY, toast } from '../util';
 import { sourceBadge, stageChip } from './library';
 import { renderSheet, resetSheet } from './sheet';
 
@@ -30,7 +30,11 @@ function wireTakes(b: HTMLElement, s: SongDetail) {
     const i = s.takes.findIndex((t) => t.id === id);
     const items: [string, () => void][] = [];
     if (!isMaster(s, id, i)) items.push(['Make master', async () => {
-      await api.setMasterTake(s.id, id).catch((err) => toast(errText(err)));
+      try {
+        await api.setMasterTake(s.id, id);
+      } catch (err) {
+        return toast(errText(err));
+      }
       await afterChange();
       toast(`Take ${i + 1} is now the master`);
     }]);
@@ -208,7 +212,7 @@ export function renderTab() {
   if (tab === 'details') {
     const fields: [keyof SongDetail, string][] = [['title', 'Title'], ['artist', 'Artist'], ['album', 'Album'], ['year', 'Year'], ['genre', 'Genre']];
     b.innerHTML = `<div class="details">
-      <div><div class="art" style="${s.art ? `background-image:url('${lt('art', s.art)}')` : ''}">${s.art ? '' : 'No artwork'}</div>
+      <div><div class="art" style="${s.art ? `background-image:${esc(cssUrl(lt('art', s.art)))}` : ''}">${s.art ? '' : 'No artwork'}</div>
         <div class="row"><button class="btn small" id="artSet">${s.art ? 'Change artwork' : 'Add artwork'}</button>${s.art ? '<button class="btn small" id="artClear">Remove</button>' : ''}</div></div>
       <div class="form">${fields
         .map(([k, l]) => `<label for="d_${k}">${l}</label><input id="d_${k}" data-k="${k}" value="${esc(s[k])}"${k === 'genre' ? ' list="genreList" placeholder="Pick a tag or type a new one"' : ''}${k === 'artist' && s.source === 'ai' ? ' readonly' : ''}>`)
@@ -240,7 +244,11 @@ export function renderTab() {
     $('#artSet').onclick = async () => {
       const path = await pickFile({ multiple: false, filters: [{ name: 'Images, or a song file with a cover inside', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp3', 'm4a', 'flac', 'ogg', 'opus'] }] });
       if (typeof path !== 'string') return;
-      await api.setArt(s.id, path).catch((e) => toast(errText(e)));
+      try {
+        await api.setArt(s.id, path);
+      } catch (e) {
+        return toast(errText(e));
+      }
       await afterChange();
       toast('Artwork added');
     };
@@ -264,7 +272,11 @@ export function renderTab() {
         $('#delNote').textContent = s.source === 'library' ? 'The file stays on your computer. Rescanning its folder brings it back.' : 'This deletes the song, its versions, takes and sheets.';
         return;
       }
-      await api.deleteSong(s.id).catch((e) => toast(errText(e)));
+      try {
+        await api.deleteSong(s.id);
+      } catch (e) {
+        return toast(errText(e));
+      }
       $<HTMLDialogElement>('#dlg').close();
       await reload();
       rerender();

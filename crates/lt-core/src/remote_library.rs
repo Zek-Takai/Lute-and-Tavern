@@ -2,11 +2,13 @@
 //! server becomes a library song that streams from the server (provider "remote", provider_id
 //! "<connection id>:<song id>"), with its tags and cover, so it shows in My music, Albums, Genres and
 //! playlists like any other song. Songs the person already has as local files stay local only (the local
-//! copy wins). Songs gone from the server leave the library on the next sync.
+//! copy wins; a server song already in playlists moves over to the local copy). Songs gone from the server
+//! leave the library on the next sync. A sync only lands while the connection still exists with "In My
+//! music" on, so removing it or turning it off during a sync can't bring the songs back.
 
 use crate::library::{Library, now};
 use crate::remote::RemoteItem;
-use anyhow::Result;
+use anyhow::{Result, bail};
 use rusqlite::params;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -42,13 +44,16 @@ impl Library {
     }
 
     /// Makes the library match the server: adds and updates `items`, removes songs no longer there.
-    /// `art` maps a song's cover reference to stored artwork (see `store_cover`).
+    /// `art` maps a song's cover reference to stored artwork (see `store_cover`). `items` must be the
+    /// server's complete list. Fails without changing anything when the connection was removed or "In My
+    /// music" was turned off meanwhile.
     pub fn sync_remote_songs(&self, conn: i64, items: &[RemoteItem], art: &HashMap<String, String>) -> Result<LibrarySync> {
         let mut report = LibrarySync { total: items.len(), ..Default::default() };
-        let locals: HashSet<String> = {
+        // same song as a local file → that local song's id
+        let locals: HashMap<String, i64> = {
             let db = self.db();
-            let mut st = db.prepare("SELECT title, artist, album FROM songs WHERE provider = 'local' AND source = 'library'")?;
-            let rows = st.query_map([], |r| Ok(key(&r.get::<_, String>(0)?, &r.get::<_, String>(1)?, &r.get::<_, String>(2)?)))?;
+            let mut st = db.prepare("SELECT id, title, artist, album FROM songs WHERE provider = 'local' AND source = 'library' ORDER BY id DESC")?;
+            let rows = st.query_map([], |r| Ok((key(&r.get::<_, String>(1)?, &r.get::<_, String>(2)?, &r.get::<_, String>(3)?), r.get::<_, i64>(0)?)))?;
             rows.filter_map(|r| r.ok()).collect()
         };
         // genres first (ensure_genre takes the lock itself)
@@ -63,8 +68,17 @@ impl Library {
         {
             let mut db = self.db();
             let tx = db.transaction()?;
+            // Checked under the same lock as the writes, so a removal or turn-off can't slip in between.
+            let in_library = tx
+                .query_row("SELECT extra FROM connections WHERE id = ?1", [conn], |r| r.get::<_, String>(0))
+                .ok()
+                .and_then(|e| serde_json::from_str::<serde_json::Value>(&e).ok())
+                .is_some_and(|e| e["inLibrary"].as_bool() == Some(true));
+            if !in_library {
+                bail!("This server was removed or taken out of My music, so its songs were not added");
+            }
             for it in items.iter().filter(|i| i.kind == "song") {
-                if locals.contains(&key(&it.name, &it.artist, &it.album)) {
+                if locals.contains_key(&key(&it.name, &it.artist, &it.album)) {
                     report.local += 1;
                     continue;
                 }
@@ -83,12 +97,20 @@ impl Library {
                 )?;
                 if existed { report.updated += 1 } else { report.added += 1 }
             }
-            let old: Vec<(i64, String)> = {
-                let mut st = tx.prepare("SELECT id, provider_id FROM songs WHERE provider = 'remote' AND provider_id LIKE ?1")?;
-                st.query_map([format!("{conn}:%")], |r| Ok((r.get(0)?, r.get(1)?)))?.filter_map(|r| r.ok()).collect()
+            let old: Vec<(i64, String, String)> = {
+                let mut st = tx.prepare("SELECT id, provider_id, title, artist, album FROM songs WHERE provider = 'remote' AND provider_id LIKE ?1")?;
+                st.query_map([format!("{conn}:%")], |r| Ok((r.get(0)?, r.get(1)?, key(&r.get::<_, String>(2)?, &r.get::<_, String>(3)?, &r.get::<_, String>(4)?))))?
+                    .filter_map(|r| r.ok())
+                    .collect()
             };
-            for (id, pid) in old {
+            for (id, pid, k) in old {
                 if !keep.contains(&pid) {
+                    // Now a local file: playlists, notes and sheets move to the local copy instead of being lost.
+                    if let Some(local) = locals.get(&k) {
+                        tx.execute("UPDATE OR IGNORE playlist_songs SET song_id = ?2 WHERE song_id = ?1", [id, *local])?;
+                        tx.execute("UPDATE messages SET song_id = ?2 WHERE song_id = ?1", [id, *local])?;
+                        tx.execute("UPDATE sheets SET song_id = ?2 WHERE song_id = ?1", [id, *local])?;
+                    }
                     tx.execute("DELETE FROM songs WHERE id = ?1", [id])?;
                     report.removed += 1;
                 }
@@ -118,10 +140,15 @@ mod tests {
         RemoteItem { id: id.into(), kind: "song".into(), name: title.into(), artist: artist.into(), album: album.into(), genre: "Rock".into(), cover: Some(format!("c-{album}")), ..Default::default() }
     }
 
+    fn conn(l: &Library) -> i64 {
+        l.add_connection("subsonic", "Home", "http://nas.local:4533", "listener", &serde_json::json!({"inLibrary": true})).unwrap().id
+    }
+
     #[test]
     fn server_songs_join_the_library_and_follow_the_server() {
         let d = tempfile::tempdir().unwrap();
         let l = Library::open(d.path()).unwrap();
+        let c = conn(&l);
         // a local file of the same song
         {
             let db = l.db();
@@ -129,16 +156,53 @@ mod tests {
         }
         let art: HashMap<String, String> = [("c-Meteora".to_string(), "abc.jpg".to_string())].into();
         let items = vec![song("1", "Numb", "Linkin Park", "Meteora"), song("2", "Faint", "Linkin Park", "Meteora"), song("3", "Lying from You", "Linkin Park", "Meteora")];
-        let r = l.sync_remote_songs(7, &items, &art).unwrap();
+        let r = l.sync_remote_songs(c, &items, &art).unwrap();
         assert_eq!((r.added, r.local, r.removed), (2, 1, 0), "the local Numb wins");
         let faint = l.songs().unwrap().into_iter().find(|s| s.title == "Faint").unwrap();
-        assert_eq!((faint.provider.as_str(), faint.provider_id.as_deref(), faint.art.as_deref(), faint.genre.as_str()), ("remote", Some("7:2"), Some("abc.jpg"), "Rock"));
+        assert_eq!((faint.provider.as_str(), faint.provider_id.as_deref(), faint.art.as_deref(), faint.genre.as_str()), ("remote", Some(format!("{c}:2").as_str()), Some("abc.jpg"), "Rock"));
         // the server drops a song and renames another
         let items = vec![RemoteItem { name: "Faint (Live)".into(), ..song("2", "", "Linkin Park", "Meteora") }];
-        let r = l.sync_remote_songs(7, &items, &HashMap::new()).unwrap();
+        let r = l.sync_remote_songs(c, &items, &HashMap::new()).unwrap();
         assert_eq!((r.updated, r.removed), (1, 1));
-        let faint = l.songs().unwrap().into_iter().find(|s| s.provider_id.as_deref() == Some("7:2")).unwrap();
+        let faint = l.songs().unwrap().into_iter().find(|s| s.provider_id.as_deref() == Some(format!("{c}:2").as_str())).unwrap();
         assert_eq!((faint.title.as_str(), faint.art.as_deref()), ("Faint (Live)", Some("abc.jpg")), "artwork is kept when not resent");
-        assert_eq!(l.remove_remote_songs(7).unwrap(), 1);
+        assert_eq!(l.remove_remote_songs(c).unwrap(), 1);
+    }
+
+    #[test]
+    fn a_sync_never_lands_after_the_server_was_removed_or_turned_off() {
+        let d = tempfile::tempdir().unwrap();
+        let l = Library::open(d.path()).unwrap();
+        let c = conn(&l);
+        let items = vec![song("1", "Faint", "Linkin Park", "Meteora")];
+        l.set_connection_extra(c, "inLibrary", serde_json::Value::Bool(false)).unwrap();
+        assert!(l.sync_remote_songs(c, &items, &HashMap::new()).is_err());
+        l.remove_connection(c).unwrap();
+        assert!(l.sync_remote_songs(c, &items, &HashMap::new()).is_err());
+        assert!(l.songs().unwrap().is_empty(), "nothing came back");
+    }
+
+    #[test]
+    fn a_new_local_copy_takes_over_the_server_song_in_playlists() {
+        let d = tempfile::tempdir().unwrap();
+        let l = Library::open(d.path()).unwrap();
+        let c = conn(&l);
+        l.sync_remote_songs(c, &[song("2", "Faint", "Linkin Park", "Meteora")], &HashMap::new()).unwrap();
+        let remote = l.songs().unwrap().into_iter().find(|s| s.title == "Faint").unwrap().id;
+        let local = {
+            let db = l.db();
+            db.execute("INSERT INTO playlists(id, name, created_at) VALUES (1, 'Road', 1)", []).unwrap();
+            db.execute("INSERT INTO playlist_songs(playlist_id, song_id, pos) VALUES (1, ?1, 0)", [remote]).unwrap();
+            db.execute("INSERT INTO songs(source, title, artist, album, genre, added_at, updated_at) VALUES ('library', 'Faint', 'Linkin Park', 'Meteora', 'Rock', 1, 1)", []).unwrap();
+            db.last_insert_rowid()
+        };
+        let r = l.sync_remote_songs(c, &[song("2", "Faint", "Linkin Park", "Meteora")], &HashMap::new()).unwrap();
+        assert_eq!((r.local, r.removed), (1, 1));
+        let in_playlist: Vec<i64> = {
+            let db = l.db();
+            let mut st = db.prepare("SELECT song_id FROM playlist_songs WHERE playlist_id = 1").unwrap();
+            st.query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect()
+        };
+        assert_eq!(in_playlist, [local], "the playlist now holds the local copy");
     }
 }

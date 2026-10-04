@@ -78,7 +78,7 @@ fn save_key(state: &AppState, cache: &TokenCache, path: &str, key_id: &str, team
     sign(&pem, &key_id, &team_id).map_err(|e| format!("The key could not sign a token: {e}"))?;
     keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_USER)
         .and_then(|e| e.set_password(&pem))
-        .map_err(|e| format!("Could not save the key in the keychain: {e}"))?;
+        .map_err(|e| format!("Could not save the key in the keychain: {e}{}", crate::secure::KEYRING_HINT))?;
     for (k, v) in [("musickitKeyId", key_id), ("musickitTeamId", team_id)] {
         state.lib.set_setting(k, &serde_json::Value::String(v)).map_err(|e| e.to_string())?;
     }
@@ -98,8 +98,15 @@ pub fn musickit_forget_key(cache: State<'_, TokenCache>) -> Result<(), String> {
 /// The developer token MusicKit JS is configured with.
 #[tauri::command]
 pub fn musickit_token(state: State<'_, AppState>, cache: State<'_, TokenCache>) -> Result<String, String> {
+    // The token built into a release lasts at most six months (Apple's limit). Once it has run out, the
+    // person's own key (if they added one) takes over; otherwise they're told to update.
     if let Some(t) = EMBEDDED.filter(|t| !t.is_empty()) {
-        return Ok(t.to_string());
+        if expires(t).is_none_or(|e| e > now() + 3600) {
+            return Ok(t.to_string());
+        }
+        if stored_key().is_none() {
+            return Err("The Apple Music access built into this version of Lute & Tavern has expired. Update the app, or add your own MusicKit key in Settings > Apple Music.".into());
+        }
     }
     let mut c = cache.0.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((t, exp)) = c.as_ref()
@@ -113,6 +120,14 @@ pub fn musickit_token(state: State<'_, AppState>, cache: State<'_, TokenCache>) 
     let (token, exp) = sign(&key, &key_id, &team_id)?;
     *c = Some((token.clone(), exp));
     Ok(token)
+}
+
+/// When a token runs out (its "exp"), read without checking the signature.
+fn expires(token: &str) -> Option<u64> {
+    use base64::Engine;
+    let payload = token.split('.').nth(1)?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload.trim_end_matches('=')).ok()?;
+    serde_json::from_slice::<serde_json::Value>(&bytes).ok()?["exp"].as_u64()
 }
 
 fn sign(pem: &str, key_id: &str, team_id: &str) -> Result<(String, u64), String> {

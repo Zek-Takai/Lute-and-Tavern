@@ -64,6 +64,7 @@ commands.allow = [
   "radio_search",
   "radio_home",
   "radio_favorite",
+  "radio_favorites",
   "radio_play",
   "connections_list",
   "connection_add",

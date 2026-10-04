@@ -38,7 +38,7 @@ fn new_token() -> Result<String, String> {
     let mut b = [0u8; 32];
     getrandom::fill(&mut b).map_err(|e| e.to_string())?;
     let t: String = b.iter().map(|x| format!("{x:02x}")).collect();
-    entry()?.set_password(&t).map_err(|e| format!("Could not save the token in the keychain: {e}"))?;
+    entry()?.set_password(&t).map_err(|e| format!("Could not save the token in the keychain: {e}{}", crate::secure::KEYRING_HINT))?;
     Ok(t)
 }
 
@@ -52,7 +52,18 @@ fn token() -> Result<String, String> {
 pub fn start(app: &AppHandle) -> Result<(), String> {
     stop(app);
     let token = token()?;
-    let server = Arc::new(Server::http(("127.0.0.1", PORT)).map_err(|e| format!("Could not open port {PORT}: {e}"))?);
+    // A server that was just stopped lets go of the port a moment later, so a restart waits for it briefly.
+    let mut tries = 0;
+    let server = loop {
+        match Server::http(("127.0.0.1", PORT)) {
+            Ok(s) => break Arc::new(s),
+            Err(_) if tries < 20 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(e) => return Err(format!("Could not open port {PORT}: {e}")),
+        }
+    };
     *app.state::<Running>().0.lock().unwrap() = Some(server.clone());
     let app = app.clone();
     std::thread::spawn(move || {
@@ -91,7 +102,8 @@ fn serve(app: &AppHandle, token: &str, mut req: Request) {
     }
     // Web pages must not reach this server (DNS rebinding); desktop MCP clients send no Origin.
     if let Some(o) = header(&req, "Origin") {
-        if !(o.starts_with("http://127.0.0.1") || o.starts_with("http://localhost")) {
+        let host = reqwest::Url::parse(o).ok().and_then(|u| u.host_str().map(str::to_string));
+        if !matches!(host.as_deref(), Some("127.0.0.1" | "localhost" | "[::1]")) {
             return respond(req, 403, r#"{"error":"Origin not allowed"}"#.into());
         }
     }

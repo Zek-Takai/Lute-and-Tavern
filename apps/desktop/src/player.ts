@@ -4,7 +4,7 @@ import { api, lt, type Song, type Stem } from './api';
 import { applePause, applePosition, appleResume, appleSeek, appleStop, artUrl, playApple } from './apple';
 import { BEATS, IDX, SCALE, keyName } from './music/notation';
 import { byId, playable, saveSetting, setting, viewName, type Repeat } from './state';
-import { $, esc, hueOf, PAUSE, PLAY, toast } from './util';
+import { $, cssUrl, esc, hueOf, PAUSE, PLAY, toast } from './util';
 
 let ac: AudioContext | null = null;
 let master: GainNode | null = null;
@@ -29,6 +29,8 @@ export let paused = false;
 /** Where the next start of the current song begins (a restored position after relaunch). */
 let resumeAt = 0;
 let lastSaved = 0;
+/** Bumped by every stop and every new start; a start that awaited something checks it is still the latest. */
+let playGen = 0;
 
 /** Called with the index of the note sounding during a melody preview (-1 when it stops). */
 export let onMelodyNote: (song: Song, i: number) => void = () => {};
@@ -52,6 +54,7 @@ function ensureAudio() {
 }
 
 export function stop() {
+  playGen++;
   if (playing) {
     if (playing.kind === 'synth') {
       playing.nodes.forEach((n) => { try { n.stop(); } catch { /* already stopped */ } });
@@ -189,9 +192,11 @@ export function playSong(s: Song, list?: Song[]) {
   if (s.provider === 'apple') return void startApple(s, startAt);
   const stream = streamSources[s.provider];
   if (stream) {
+    // A newer pick (or Stop) while the address loads wins.
+    const gen = ++playGen;
     stream(s)
-      .then((url) => playFile(url, s, s.artist || s.album, String(s.id), s.provider === 'radio' ? 0 : startAt))
-      .catch((e) => toast(`Could not play "${s.title}": ${e}`));
+      .then((url) => gen === playGen && playFile(url, s, s.artist || s.album, String(s.id), s.provider === 'radio' ? 0 : startAt))
+      .catch((e) => gen === playGen && toast(`Could not play "${s.title}": ${e}`));
     return;
   }
   if (s.hasFile) playFile(lt('audio', s.id), s, [s.artist, s.album].filter(Boolean).join(', '), String(s.id), startAt);
@@ -220,9 +225,12 @@ function playFile(url: string, s: Song, sub: string, id: string, startAt = 0) {
       void api.logEvent('error', `audio element failed: code=${e?.code} message=${e?.message ?? ''} src=${media!.currentSrc}`);
     };
   }
+  const gen = playGen;
   media.src = url;
-  if (startAt > 0) media.addEventListener('loadedmetadata', () => (media!.currentTime = startAt), { once: true });
+  if (startAt > 0) media.addEventListener('loadedmetadata', () => { if (gen === playGen) media!.currentTime = startAt; }, { once: true });
   media.play().catch((err) => {
+    // A later song or Stop cut this start short (AbortError): not a failure, and must not stop the new song.
+    if (gen !== playGen || err?.name === 'AbortError') return;
     void api.logEvent('error', `play() rejected for ${url}: ${err?.name ?? ''} ${err?.message ?? err}`);
     stop();
     toast('This file could not be played. The format may not be supported.');
@@ -274,6 +282,7 @@ export function pickStems(files: Stem[]) {
 /** Apple Music songs play in Apple's own player; the app's queue and controls still drive them. */
 async function startApple(s: Song, startAt: number) {
   stop();
+  const gen = playGen;
   const id = String(s.id);
   playing = { kind: 'apple', id };
   paused = false;
@@ -283,10 +292,11 @@ async function startApple(s: Song, startAt: number) {
   syncIcons();
   try {
     await playApple(s, startAt, () => {
-      if (playing?.kind === 'apple' && playing.id === id) onEnded();
-    });
+      if (gen === playGen) onEnded();
+    }, () => gen === playGen);
   } catch (e) {
-    if (playing?.kind === 'apple' && playing.id === id) playing = null;
+    if (gen !== playGen) return;
+    playing = null;
     syncIcons();
     toast(`Apple Music: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -300,9 +310,13 @@ const takeResume = () => {
 
 export async function playStems(s: Song, startAt = 0) {
   stop();
+  const gen = playGen;
   if (!ensureAudio()) return;
   void ac!.resume();
-  const files = pickStems((await api.songDetail(s.id)).stemFiles);
+  const detail = await api.songDetail(s.id);
+  // Pressed twice, or another song started while the details loaded: only the latest start plays.
+  if (gen !== playGen) return;
+  const files = pickStems(detail.stemFiles);
   if (!files.length) return toast('This song has no stems left.');
   const tracks: StemTrack[] = files.map((f) => {
     const el = new Audio();
@@ -330,7 +344,7 @@ export async function playStems(s: Song, startAt = 0) {
     t.el.addEventListener('canplay', () => res(), { once: true });
     t.el.addEventListener('error', () => res(), { once: true });
   })));
-  if (playing?.kind !== 'stems' || playing.id !== id) return;
+  if (gen !== playGen || playing?.kind !== 'stems' || playing.id !== id) return;
   const lead = tracks[0].el;
   lead.onended = onEnded;
   if (startAt > 0) for (const t of tracks) t.el.currentTime = startAt;
@@ -575,7 +589,7 @@ function showNow(s: Song, sub: string) {
   const a = $('#pArt');
   const img = s.art ? lt('art', s.art) : artUrl(s.artUrl, 120);
   a.hidden = !img;
-  if (img) a.style.backgroundImage = `url('${img}')`;
+  if (img) a.style.backgroundImage = cssUrl(img);
 }
 
 /** After the library reloads, keep queue entries pointing at fresh song objects. */
@@ -601,8 +615,8 @@ export function syncIcons() {
 // ---------- now playing list ----------
 
 export function thumb(s: Song) {
-  if (s.art) return `<span class="th" style="background-image:url('${lt('art', s.art)}')"></span>`;
-  if (s.artUrl) return `<span class="th" style="background-image:url('${artUrl(s.artUrl, 80)}')"></span>`;
+  if (s.art) return `<span class="th" style="background-image:${esc(cssUrl(lt('art', s.art)))}"></span>`;
+  if (s.artUrl) return `<span class="th" style="background-image:${esc(cssUrl(artUrl(s.artUrl, 80)!))}"></span>`;
   const h = hueOf(s.title + s.artist);
   return `<span class="th" style="background-image:linear-gradient(135deg,hsl(${h} 55% 38%),hsl(${(h + 50) % 360} 60% 18%))">${esc((s.title[0] || '♪').toUpperCase())}</span>`;
 }

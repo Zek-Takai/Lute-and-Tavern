@@ -256,10 +256,16 @@ export async function findOnApple(e: { title: string; artist: string; album: str
 
 // ---------- playback ----------
 
-/** Plays one Apple song. `onEnd` runs when it finishes so the app's own queue moves on. */
-export async function playApple(s: Song, startAt: number, onEnd: () => void) {
+/** Newest Apple song handed to the player; an older one that finishes loading late must not touch the player. */
+let appleReq = 0;
+
+/** Plays one Apple song. `onEnd` runs when it finishes so the app's own queue moves on. `isCurrent` turns false
+ *  once the person picks something else or presses Stop; a start that is no longer wanted then plays nothing. */
+export async function playApple(s: Song, startAt: number, onEnd: () => void, isCurrent: () => boolean = () => true) {
   const m = await musicKit();
+  if (!isCurrent()) return;
   if (!m.isAuthorized) await connectApple();
+  if (!isCurrent()) return;
   const PS = window.MusicKit.PlaybackStates;
   const handler = ({ state }: { state: number }) => {
     if (state === PS.completed || state === PS.ended) {
@@ -270,7 +276,12 @@ export async function playApple(s: Song, startAt: number, onEnd: () => void) {
   m.removeEventListener('playbackStateDidChange', (m as any).__ltEnd);
   (m as any).__ltEnd = handler;
   m.addEventListener('playbackStateDidChange', handler);
+  const req = ++appleReq;
   await m.setQueue({ song: s.providerId, startPlaying: true, startTime: startAt || 0 });
+  if (isCurrent()) return;
+  // Something else was picked while Apple queued this song. A newer Apple song owns the player; otherwise silence it.
+  m.removeEventListener('playbackStateDidChange', handler);
+  if (req === appleReq) await m.stop();
 }
 
 export const applePause = () => mk?.pause();

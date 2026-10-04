@@ -126,8 +126,29 @@ fn free_path(target: &Path) -> PathBuf {
         .expect("unbounded range")
 }
 
-/// Moves a file, falling back to copy-and-delete across drives. Never overwrites.
+/// Whether two paths are the same file or folder on disk (e.g. only the letter case differs on macOS or
+/// Windows).
+fn same_entry(a: &Path, b: &Path) -> bool {
+    matches!((a.canonicalize(), b.canonicalize()), (Ok(x), Ok(y)) if x == y)
+}
+
+/// Renames in two steps, for a change of letter case only on a case-insensitive disk.
+fn rename_case(from: &Path, to: &Path) -> std::io::Result<()> {
+    let tmp = from.with_file_name(format!(".lt-rename-{}", std::process::id()));
+    std::fs::rename(from, &tmp)?;
+    std::fs::rename(&tmp, to).or_else(|e| {
+        let _ = std::fs::rename(&tmp, from);
+        Err(e)
+    })
+}
+
+/// Moves a file, falling back to copy-and-delete across drives. Never overwrites. If the original can't be
+/// removed, the copy is removed again, so a failed move leaves nothing behind.
 pub fn move_file(from: &Path, to: &Path) -> Result<PathBuf> {
+    if to.exists() && same_entry(from, to) {
+        rename_case(from, to).with_context(|| format!("renaming {}", from.display()))?;
+        return Ok(to.to_path_buf());
+    }
     let to = free_path(to);
     if let Some(dir) = to.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
@@ -135,7 +156,10 @@ pub fn move_file(from: &Path, to: &Path) -> Result<PathBuf> {
     if std::fs::rename(from, &to).is_err() {
         std::fs::copy(from, &to)
             .with_context(|| format!("copying {} to {}", from.display(), to.display()))?;
-        std::fs::remove_file(from).with_context(|| format!("removing {}", from.display()))?;
+        if let Err(e) = std::fs::remove_file(from) {
+            let _ = std::fs::remove_file(&to);
+            return Err(e).with_context(|| format!("{} is in use or read-only, so it was left where it is", from.display()));
+        }
     }
     Ok(to)
 }
@@ -284,6 +308,9 @@ impl Library {
         loose.sort_by_key(|p| (tags::stem_of(p).is_some(), p.clone()));
         let mut moved = 0;
         for p in loose {
+            if self.organize_failed.lock().unwrap_or_else(|e| e.into_inner()).contains(&p) {
+                continue;
+            }
             let ext = p
                 .extension()
                 .and_then(|e| e.to_str())
@@ -324,7 +351,15 @@ impl Library {
             if target == p {
                 continue;
             }
-            let new = move_file(&p, &target)?;
+            // A file that can't be moved (in use, read-only) stays where it is and is still imported there.
+            let new = match move_file(&p, &target) {
+                Ok(n) => n,
+                Err(e) => {
+                    eprintln!("organize: {e:#}");
+                    self.organize_failed.lock().unwrap_or_else(|e| e.into_inner()).insert(p.clone());
+                    continue;
+                }
+            };
             let (old_s, new_s) = (
                 p.to_string_lossy().to_string(),
                 new.to_string_lossy().to_string(),
@@ -452,15 +487,27 @@ impl Library {
         let want = self.song_dir_for(&root, &title, &artist, Some(id))?;
         let mut dir_now = dir.clone();
         if want != dir && dir.exists() {
-            let want = free_path(&want);
-            std::fs::rename(&dir, &want).with_context(|| format!("renaming {}", dir.display()))?;
-            let (old, new) = (
-                dir.to_string_lossy().to_string(),
-                want.to_string_lossy().to_string(),
-            );
+            let want = if want.exists() && same_entry(&dir, &want) {
+                rename_case(&dir, &want).with_context(|| format!("renaming {}", dir.display()))?;
+                want
+            } else {
+                let want = free_path(&want);
+                std::fs::rename(&dir, &want).with_context(|| format!("renaming {}", dir.display()))?;
+                want
+            };
+            let new = want.to_string_lossy().to_string();
             let db = self.db();
+            // Paths inside the old folder, matched exactly (not with LIKE: '_' and '%' in names are wildcards).
             for table in ["songs", "stems", "takes", "sheets"] {
-                db.execute(&format!("UPDATE {table} SET path = ?2 || substr(path, length(?1) + 1) WHERE path LIKE ?1 || '/%'"), params![old, new])?;
+                let rows: Vec<(i64, String)> = {
+                    let mut st = db.prepare(&format!("SELECT rowid, path FROM {table} WHERE path IS NOT NULL"))?;
+                    st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.filter_map(|r| r.ok()).collect()
+                };
+                for (rowid, p) in rows {
+                    if let Ok(rest) = Path::new(&p).strip_prefix(&dir) {
+                        db.execute(&format!("UPDATE {table} SET path = ?2 WHERE rowid = ?1"), params![rowid, want.join(rest).to_string_lossy()])?;
+                    }
+                }
             }
             db.execute("UPDATE songs SET song_dir = ?2, stem_group = CASE WHEN stem_group IS NULL THEN NULL ELSE ?2 END WHERE id = ?1", params![id, new])?;
             dir_now = want;
@@ -521,7 +568,8 @@ impl Library {
             .filter_map(|e| e.ok())
             .map(|e| e.path())
         {
-            if old.file_stem().and_then(|s| s.to_str()) == Some("cover") {
+            let image = old.extension().and_then(|e| e.to_str()).is_some_and(|e| ["jpg", "jpeg", "png", "gif", "webp", "bmp"].contains(&e.to_ascii_lowercase().as_str()));
+            if image && old.file_stem().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case("cover")) {
                 let _ = std::fs::remove_file(old);
             }
         }

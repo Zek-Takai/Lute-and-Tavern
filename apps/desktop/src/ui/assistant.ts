@@ -1,6 +1,6 @@
 // The assistant overlay: a chat with the person's own AI that can run the app (search, playlists, playback,
 // songwriting). Opens with a shortcut the person picks; a second shortcut talks instead of typing, through
-// any Whisper server set in Settings. luteandtavern://ask?text=... links land here too.
+// any Whisper server set in Settings. luteandtavern://ask?text=... links only fill in the box; the person sends.
 import { listen } from '@tauri-apps/api/event';
 import { api, errText, type ChatLine } from '../api';
 import { state, writerName } from '../state';
@@ -30,6 +30,9 @@ const keyFor = (name: keyof typeof DEFAULT_KEYS) => (state.settings[name] as str
 let busy = false;
 let lines: ChatLine[] = [];
 let recorder: MediaRecorder | null = null;
+/** True while asking for the mic, before `recorder` exists; `cancelStart` asks that start to give up. */
+let starting = false;
+let cancelStart = false;
 
 function render(extra = '') {
   $('#aName').textContent = writerName();
@@ -85,9 +88,13 @@ export async function ask(text: string) {
 // ---------- voice ----------
 
 async function startRecording() {
-  if (recorder) return;
+  if (recorder || starting) return;
+  starting = true;
+  cancelStart = false;
   const sp = await api.speechSettings().catch(() => null);
+  if (cancelStart) return void (starting = false);
   if (!sp?.baseUrl) {
+    starting = false;
     await openAssistant();
     render(`<div class="m assistant err">To talk instead of type, add a Whisper server in Settings › Voice.</div>`);
     return;
@@ -96,9 +103,13 @@ async function startRecording() {
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (e) {
-    toast(`The microphone is not available: ${errText(e)}`);
+    starting = false;
+    if (!cancelStart) toast(`The microphone is not available: ${errText(e)}`);
     return;
   }
+  starting = false;
+  // Stopped or closed while the mic permission was being asked: let the mic go straight away.
+  if (cancelStart) return stream.getTracks().forEach((t) => t.stop());
   const chunks: Blob[] = [];
   const rec = new MediaRecorder(stream);
   recorder = rec;
@@ -124,13 +135,14 @@ async function startRecording() {
 }
 
 function stopRecording(send: boolean) {
+  if (starting) cancelStart = true;
   if (!recorder) return;
   (recorder as MediaRecorder & { send?: boolean }).send = send;
   if (recorder.state !== 'inactive') recorder.stop();
   recorder = null;
 }
 
-const toggleVoice = () => (recorder ? stopRecording(true) : void startRecording());
+const toggleVoice = () => (recorder || starting ? stopRecording(true) : void startRecording());
 
 // ---------- wiring ----------
 
@@ -176,9 +188,17 @@ export async function initAssistant() {
     await refresh(e.payload.ok ? '' : `<div class="m assistant err">${esc(e.payload.text)}</div>`);
     if (!e.payload.ok) toast(e.payload.text);
   });
+  // A link can come from any web page or message, so its words are only put in the box. Nothing runs until
+  // the person reads them and presses Send.
   const fromLink = async () => {
-    const text = await api.takePendingAsk().catch(() => null);
-    if (text) await ask(text);
+    const text = (await api.takePendingAsk().catch(() => null))?.trim();
+    if (!text) return;
+    await openAssistant();
+    const box = $<HTMLTextAreaElement>('#aText');
+    box.value = text;
+    box.focus();
+    box.setSelectionRange(text.length, text.length);
+    render(`<div class="m action">A link outside the app asked for this. Check it in the box below and press Send if you want ${esc(writerName())} to do it.</div>`);
   };
   await listen('assistant-link', () => void fromLink());
   await fromLink();

@@ -7,6 +7,13 @@
 use tauri::Manager;
 
 const SERVICE: &str = "Lute & Tavern";
+
+/// Added to key store errors: on Linux the key store is a separate service that may not be running.
+pub const KEYRING_HINT: &str = if cfg!(target_os = "linux") {
+    " (On Linux this needs a key store service such as GNOME Keyring or KWallet to be running.)"
+} else {
+    ""
+};
 /// The only names the interface may read or write.
 const ALLOWED: &[&str] = &["web-storage"];
 
@@ -14,7 +21,7 @@ fn entry(name: &str) -> Result<keyring::Entry, String> {
     if !ALLOWED.contains(&name) {
         return Err(format!("{name} is not a secure storage slot"));
     }
-    keyring::Entry::new(SERVICE, name).map_err(|e| format!("The system key store is not available: {e}"))
+    keyring::Entry::new(SERVICE, name).map_err(|e| format!("The system key store is not available: {e}{}", crate::secure::KEYRING_HINT))
 }
 
 #[tauri::command]

@@ -84,7 +84,7 @@ export function albums() {
 
 /** Songs from radio and connected servers stream, so they always count as playable. */
 export const STREAMED = ['apple', 'radio', 'remote'];
-export const playable = (s: Song) => STREAMED.includes(s.provider ?? '') || s.hasAudio || s.notes.length > 0;
+export const playable = (s: Song) => !s.missing && (STREAMED.includes(s.provider ?? '') || s.hasAudio || s.notes.length > 0);
 
 function inView(s: Song) {
   const v = state.view;

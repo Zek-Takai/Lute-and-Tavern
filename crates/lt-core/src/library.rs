@@ -91,6 +91,8 @@ pub struct Song {
     pub provider_id: Option<String>,
     /// Artwork from the service, as a URL template.
     pub art_url: Option<String>,
+    /// Its file can't be found right now (moved away, or the drive is offline); it comes back with the file.
+    pub missing: bool,
 }
 
 /// A song from a streaming service, as the interface sends it when saving it to the library.
@@ -117,7 +119,8 @@ const SONG_COLS: &str = "s.id, s.source, s.title, s.artist, s.album, s.year, s.g
     s.art, s.added_at, s.updated_at, s.request, s.status, s.sub_genre, s.song_key, s.bpm, s.style, s.exclude, s.lyrics, \
     s.master_take, s.notes_json, s.chords_json, \
     (s.path IS NOT NULL OR EXISTS (SELECT 1 FROM takes t WHERE t.song_id = s.id)), (SELECT COUNT(*) FROM stems st WHERE st.song_id = s.id), \
-    (SELECT s.song_dir FROM folders f WHERE f.id = s.folder_id AND f.managed = 1), s.provider, s.provider_id, s.art_url";
+    (SELECT s.song_dir FROM folders f WHERE f.id = s.folder_id AND f.managed = 1), s.provider, s.provider_id, s.art_url, \
+    s.missing_since IS NOT NULL";
 
 fn song_from_row(r: &Row) -> rusqlite::Result<Song> {
     let notes: String = r.get(22)?;
@@ -153,6 +156,7 @@ fn song_from_row(r: &Row) -> rusqlite::Result<Song> {
         provider: r.get(27)?,
         provider_id: r.get(28)?,
         art_url: r.get(29)?,
+        missing: r.get(30)?,
     })
 }
 
@@ -221,6 +225,8 @@ pub struct Playlist {
     pub id: i64,
     pub name: String,
     pub songs: Vec<i64>,
+    /// Songs of this playlist (from another device) that aren't in this library
+    pub missing: i64,
 }
 
 /// A genre tag. `origin` says who made it: a default, the person, the songwriter, or a music file's own tag.
@@ -247,6 +253,8 @@ pub struct ScanReport {
     pub updated: usize,
     pub removed: usize,
     pub untagged: usize,
+    /// Folders that couldn't be reached (left as they were)
+    pub unreachable: Vec<String>,
 }
 
 /// Fields a person can edit on any song.
@@ -298,7 +306,14 @@ pub struct FlacReport {
 pub struct Library {
     conn: Mutex<Connection>,
     pub dirs: DataDirs,
+    /// One folder scan at a time (the watcher, its follow-up and commands can all start one).
+    scan_lock: Mutex<()>,
+    /// Loose files that could not be moved into place, so they are not retried on every scan.
+    pub(crate) organize_failed: Mutex<std::collections::HashSet<PathBuf>>,
 }
+
+/// How long a song whose file is gone stays (greyed out) before it leaves the library.
+const MISSING_GRACE_SECS: i64 = 30 * 86400;
 
 impl Library {
     pub fn open(data_dir: &Path) -> Result<Self> {
@@ -307,6 +322,8 @@ impl Library {
         Ok(Self {
             conn: Mutex::new(conn),
             dirs,
+            scan_lock: Mutex::new(()),
+            organize_failed: Mutex::new(Default::default()),
         })
     }
 
@@ -408,7 +425,7 @@ impl Library {
             if let Some(v) = &p.title {
                 let v = v.trim();
                 db.execute(
-                    "UPDATE songs SET title = ?2, updated_at = ?3 WHERE id = ?1",
+                    "UPDATE songs SET title = ?2, updated_at = ?3, tags_edited = 1 WHERE id = ?1",
                     params![id, if v.is_empty() { "Untitled" } else { v }, t],
                 )?;
             }
@@ -419,7 +436,7 @@ impl Library {
             ] {
                 if let Some(v) = val {
                     db.execute(
-                        &format!("UPDATE songs SET {col} = ?2, updated_at = ?3 WHERE id = ?1"),
+                        &format!("UPDATE songs SET {col} = ?2, updated_at = ?3, tags_edited = 1 WHERE id = ?1"),
                         params![id, v.trim(), t],
                     )?;
                 }
@@ -428,7 +445,7 @@ impl Library {
         if let Some(g) = &p.genre {
             let name = self.ensure_genre(g, "user")?;
             self.db().execute(
-                "UPDATE songs SET genre = ?2, updated_at = ?3 WHERE id = ?1",
+                "UPDATE songs SET genre = ?2, updated_at = ?3, tags_edited = 1 WHERE id = ?1",
                 params![id, name, now()],
             )?;
         }
@@ -608,22 +625,41 @@ impl Library {
     }
 
     /// Stops watching a folder and removes its songs from the library (files stay on disk).
+    /// Songs that hold the app's own work (songwriter songs, takes, versions) stay, detached from the folder.
     pub fn remove_folder(&self, id: i64) -> Result<()> {
-        self.db()
-            .execute("DELETE FROM folders WHERE id = ?1", [id])?;
+        let db = self.db();
+        db.execute(
+            "UPDATE songs SET folder_id = NULL WHERE folder_id = ?1 AND (source = 'ai' OR EXISTS (SELECT 1 FROM takes t WHERE t.song_id = songs.id) \
+             OR EXISTS (SELECT 1 FROM versions v WHERE v.song_id = songs.id))",
+            [id],
+        )?;
+        db.execute("DELETE FROM folders WHERE id = ?1", [id])?;
         Ok(())
     }
 
     /// Brings the library in line with a folder: new and changed files are read, deleted files drop out.
+    /// A folder that can't be read (an unplugged drive, an offline network share) is left alone: its songs
+    /// stay. A file that's gone is first matched to a new file (moved or renamed: the song keeps its playlists
+    /// and edits), otherwise its song is kept, greyed out, for 30 days in case the file comes back.
     pub fn scan_folder(&self, folder: &Folder) -> Result<ScanReport> {
+        let _one_at_a_time = self.scan_lock.lock().unwrap_or_else(|e| e.into_inner());
         let root = PathBuf::from(&folder.path);
+        if !root.is_dir() || std::fs::read_dir(&root).is_err() {
+            bail!("{} can't be reached right now (an unplugged drive or an offline network folder?). Its songs stay in your library.", root.display());
+        }
         self.organize(folder)?;
         let mut report = ScanReport::default();
         let mut seen = std::collections::HashSet::new();
+        let mut walk_complete = true;
         let mut files: Vec<PathBuf> = walkdir::WalkDir::new(&root)
             .follow_links(true)
             .into_iter()
-            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                if e.is_err() {
+                    walk_complete = false;
+                }
+                e.ok()
+            })
             .filter(|e| {
                 e.file_type().is_file()
                     && tags::is_audio(e.path())
@@ -638,6 +674,7 @@ impl Library {
             .collect();
         // Whole songs first, so stems find the song they belong to.
         files.sort_by_key(|p| (tags::stem_of(p).is_some(), p.clone()));
+        let last_id: i64 = self.db().query_row("SELECT COALESCE(MAX(id), 0) FROM songs", [], |r| r.get(0))?;
         for path in &files {
             let path = path.as_path();
             seen.insert(path.to_string_lossy().to_string());
@@ -650,20 +687,23 @@ impl Library {
                 Imported::Unchanged => {}
             }
         }
-        let known: Vec<(i64, String)> = {
+        let known: Vec<(i64, String, bool)> = {
             let db = self.db();
-            let mut st =
-                db.prepare("SELECT id, path FROM songs WHERE folder_id = ?1 AND path IS NOT NULL")?;
-
-            st.query_map([folder.id], |r| Ok((r.get(0)?, r.get(1)?)))?
+            let mut st = db.prepare("SELECT id, path, missing_since IS NOT NULL FROM songs WHERE folder_id = ?1 AND path IS NOT NULL")?;
+            st.query_map([folder.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
                 .collect::<rusqlite::Result<Vec<_>>>()?
         };
-        for (id, path) in known {
-            if !seen.contains(&path) {
-                self.db().execute("DELETE FROM songs WHERE id = ?1", [id])?;
-                report.removed += 1;
+        let mut gone = Vec::new();
+        for (id, path, missing) in known {
+            if seen.contains(&path) || Path::new(&path).exists() {
+                if missing {
+                    self.db().execute("UPDATE songs SET missing_since = NULL WHERE id = ?1", [id])?;
+                }
+            } else if walk_complete {
+                gone.push(id);
             }
         }
+        report.removed += self.files_gone(&gone, last_id)?;
         let known_stems: Vec<(i64, String)> = {
             let db = self.db();
             let mut st = db.prepare("SELECT id, path FROM stems WHERE folder_id = ?1")?;
@@ -671,7 +711,7 @@ impl Library {
                 .collect::<rusqlite::Result<Vec<_>>>()?
         };
         for (id, path) in known_stems {
-            if !seen.contains(&path) {
+            if walk_complete && !seen.contains(&path) && !Path::new(&path).exists() {
                 self.db().execute("DELETE FROM stems WHERE id = ?1", [id])?;
             }
         }
@@ -730,6 +770,22 @@ impl Library {
             return Ok(Imported::Unchanged);
         }
         let mut info = tags::read_track(path, if song_dir.is_some() { None } else { root });
+        // A changed file of a song the person edited here, or one in the library folder (its song.json holds
+        // the details; the app itself rewrites these files to embed artwork): only the audio facts refresh.
+        if let Some((id, _)) = existing {
+            let keep: bool = self.db().query_row("SELECT tags_edited = 1 OR song_dir IS NOT NULL FROM songs WHERE id = ?1", [id], |r| r.get(0))?;
+            if keep || song_dir.is_some() {
+                let art = match &info.picture {
+                    Some((bytes, ext)) => Some(self.store_art(bytes, ext)?),
+                    None => None,
+                };
+                self.db().execute(
+                    "UPDATE songs SET duration = COALESCE(?2, duration), file_mtime = ?3, art = COALESCE(art, ?4), missing_since = NULL WHERE id = ?1",
+                    params![id, info.duration, mtime, art],
+                )?;
+                return Ok(Imported::Updated);
+            }
+        }
         if existing.is_none()
             && let Some(d) = &song_dir
             && let Some(id) = self.adopt_main_file(d, path, mtime, info.duration)?
@@ -779,17 +835,75 @@ impl Library {
         }
     }
 
-    /// Drops a single file's song when the file disappears from a watched folder.
+    /// A single file disappeared from a watched folder: its song is kept greyed out (see scan_folder).
     pub fn forget_path(&self, path: &Path) -> Result<bool> {
+        if path.exists() {
+            return Ok(false);
+        }
         let p = path.to_string_lossy();
-        let n = self
-            .db()
-            .execute("DELETE FROM songs WHERE path = ?1", [&p])?;
-        let m = self
-            .db()
-            .execute("DELETE FROM stems WHERE path = ?1", [&p])?;
+        let ids: Vec<i64> = {
+            let db = self.db();
+            let mut st = db.prepare("SELECT id FROM songs WHERE path = ?1")?;
+            st.query_map([&p], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?
+        };
+        let max: i64 = self.db().query_row("SELECT COALESCE(MAX(id), 0) FROM songs", [], |r| r.get(0))?;
+        self.files_gone(&ids, max)?;
+        let m = self.db().execute("DELETE FROM stems WHERE path = ?1", [&p])?;
         self.drop_empty_stem_songs()?;
-        Ok(n + m > 0)
+        Ok(!ids.is_empty() || m > 0)
+    }
+
+    /// Songs whose file is gone. Each is first matched to a song added after `since_id` (the same file moved
+    /// or renamed): the old song takes over the new file and keeps its id, playlists and edits. Songs with
+    /// the app's own work (songwriter songs, takes, versions) just lose the file. The rest are marked
+    /// missing, and leave once they have been missing for 30 days. Returns how many left.
+    fn files_gone(&self, ids: &[i64], since_id: i64) -> Result<usize> {
+        let t = now();
+        for &id in ids {
+            let (title, artist, dur, path, keep): (String, String, Option<f64>, String, bool) = self.db().query_row(
+                "SELECT title, artist, duration, path, source = 'ai' OR EXISTS (SELECT 1 FROM takes WHERE song_id = s.id) \
+                 OR EXISTS (SELECT 1 FROM versions WHERE song_id = s.id) FROM songs s WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )?;
+            let name = Path::new(&path).file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+            let new: Option<(i64, String, Option<i64>, Option<String>)> = {
+                let db = self.db();
+                let mut st = db.prepare("SELECT id, title, artist, duration, path, file_mtime, song_dir FROM songs WHERE id > ?1 AND path IS NOT NULL")?;
+                let rows = st.query_map([since_id], |r| {
+                    Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<f64>>(3)?, r.get::<_, String>(4)?, r.get::<_, Option<i64>>(5)?, r.get::<_, Option<String>>(6)?))
+                })?;
+                rows.filter_map(|r| r.ok())
+                    .find(|(_, ti, ar, d, p, _, _)| {
+                        let same_tags = ti.eq_ignore_ascii_case(&title) && ar.eq_ignore_ascii_case(&artist);
+                        let same_name = Path::new(p).file_name().is_some_and(|n| n.to_string_lossy().to_lowercase() == name);
+                        match (dur, d) {
+                            (Some(a), Some(b)) => (a - b).abs() <= 1.0 && (same_tags || same_name),
+                            // no readable length: only the very same file name counts
+                            _ => same_name,
+                        }
+                    })
+                    .map(|(nid, _, _, _, p, m, d)| (nid, p, m, d))
+            };
+            if let Some((nid, npath, mtime, dir)) = new {
+                let db = self.db();
+                db.execute("UPDATE stems SET song_id = ?1 WHERE song_id = ?2", params![id, nid])?;
+                db.execute("DELETE FROM songs WHERE id = ?1", [nid])?;
+                db.execute(
+                    "UPDATE songs SET path = ?2, file_mtime = ?3, song_dir = COALESCE(?4, song_dir), missing_since = NULL WHERE id = ?1",
+                    params![id, npath, mtime, dir],
+                )?;
+            } else if keep {
+                self.db().execute("UPDATE songs SET path = NULL, file_mtime = NULL WHERE id = ?1", [id])?;
+            } else {
+                self.db().execute("UPDATE songs SET missing_since = COALESCE(missing_since, ?2) WHERE id = ?1", params![id, t])?;
+            }
+        }
+        let n = self.db().execute(
+            "DELETE FROM songs WHERE missing_since IS NOT NULL AND missing_since < ?1",
+            [t - MISSING_GRACE_SECS],
+        )?;
+        Ok(n)
     }
 
     // ---------- stems ----------
@@ -1109,12 +1223,13 @@ impl Library {
     pub fn playlists(&self) -> Result<Vec<Playlist>> {
         let db = self.db();
         let mut lists = db
-            .prepare("SELECT id, name FROM playlists ORDER BY created_at, id")?
+            .prepare("SELECT id, name, (SELECT COUNT(*) FROM playlist_pending q WHERE q.playlist_id = p.id) FROM playlists p ORDER BY created_at, id")?
             .query_map([], |r| {
                 Ok(Playlist {
                     id: r.get(0)?,
                     name: r.get(1)?,
                     songs: vec![],
+                    missing: r.get(2)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1142,6 +1257,7 @@ impl Library {
             id,
             name: name.trim().into(),
             songs: songs.to_vec(),
+            missing: 0,
         })
     }
 
@@ -1172,7 +1288,7 @@ impl Library {
     /// Marks a playlist as just changed (for following across devices).
     pub fn touch_playlist(&self, id: i64) -> Result<()> {
         self.ensure_playlist_uuids()?;
-        self.db().execute("UPDATE playlists SET updated_at = ?2 WHERE id = ?1", params![id, now()])?;
+        self.db().execute("UPDATE playlists SET updated_at = MAX(?2, updated_at + 1) WHERE id = ?1", params![id, now()])?;
         Ok(())
     }
 
@@ -1200,7 +1316,8 @@ impl Library {
                 params![id, s, pos as i64],
             )?;
         }
-        tx.execute("UPDATE playlists SET updated_at = ?2 WHERE id = ?1", params![id, now()])?;
+        // always newer than the version it was made on, even if another device's clock runs ahead
+        tx.execute("UPDATE playlists SET updated_at = MAX(?2, updated_at + 1) WHERE id = ?1", params![id, now()])?;
         tx.commit()?;
         Ok(())
     }
@@ -1942,7 +2059,7 @@ fn stem_part_name(path: &Path, title: &str) -> String {
         .trim();
     let rest = if !title.is_empty()
         && stem.len() > title.len()
-        && stem[..title.len()].eq_ignore_ascii_case(title)
+        && stem.get(..title.len()).is_some_and(|p| p.eq_ignore_ascii_case(title))
     {
         &stem[title.len()..]
     } else {
@@ -2004,9 +2121,49 @@ mod tests {
             0,
             "unchanged files are skipped"
         );
-        std::fs::remove_file(music.join("01 First.mp3")).unwrap();
+        let id = songs[0].id;
+        let pl = l.create_playlist("Mix", &[id]).unwrap();
+        // gone: kept, greyed out
+        std::fs::rename(music.join("01 First.mp3"), dir.path().join("away.mp3")).unwrap();
+        assert_eq!(l.scan_folder(&f).unwrap().removed, 0);
+        assert!(l.songs().unwrap()[0].missing);
+        // back: same song again
+        std::fs::rename(dir.path().join("away.mp3"), music.join("01 First.mp3")).unwrap();
+        l.scan_folder(&f).unwrap();
+        assert!(!l.songs().unwrap()[0].missing);
+        // moved inside the folder: the same song (same id, still in its playlist) follows the file
+        std::fs::create_dir_all(dir.path().join("music/Elsewhere")).unwrap();
+        std::fs::rename(music.join("01 First.mp3"), dir.path().join("music/Elsewhere/01 First.mp3")).unwrap();
+        l.scan_folder(&f).unwrap();
+        let songs = l.songs().unwrap();
+        assert_eq!((songs.len(), songs[0].id, songs[0].missing), (1, id, false), "{songs:?}");
+        assert_eq!(l.playlists().unwrap().iter().find(|p| p.id == pl.id).unwrap().songs, vec![id]);
+        // the folder itself unreachable (unplugged drive): nothing is touched
+        std::fs::rename(dir.path().join("music"), dir.path().join("unplugged")).unwrap();
+        assert!(l.scan_folder(&f).is_err());
+        assert!(!l.songs().unwrap()[0].missing);
+        std::fs::rename(dir.path().join("unplugged"), dir.path().join("music")).unwrap();
+        // gone for more than 30 days: leaves
+        std::fs::remove_file(dir.path().join("music/Elsewhere/01 First.mp3")).unwrap();
+        l.scan_folder(&f).unwrap();
+        l.db().execute("UPDATE songs SET missing_since = 1", []).unwrap();
         assert_eq!(l.scan_folder(&f).unwrap().removed, 1);
         assert!(l.songs().unwrap().is_empty());
+    }
+
+    #[test]
+    fn stopping_a_folder_keeps_songwriter_songs() {
+        let (dir, l) = lib();
+        std::fs::create_dir_all(dir.path().join("music")).unwrap();
+        let f = l.add_folder(&dir.path().join("music")).unwrap();
+        l.db().execute("INSERT INTO songs(source, title, folder_id, added_at, updated_at) VALUES ('ai', 'Salt and Rope', ?1, 1, 1)", [f.id]).unwrap();
+        l.remove_folder(f.id).unwrap();
+        assert_eq!(l.songs().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn stem_names_with_other_alphabets_do_not_crash() {
+        assert_eq!(stem_part_name(Path::new("ボーカル.wav"), "Rain"), stem_part_name(Path::new("ボーカル.wav"), ""));
     }
 
     #[test]

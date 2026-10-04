@@ -54,6 +54,13 @@ pub async fn radio_home(state: State<'_, AppState>) -> Res<RadioHome> {
     .await
 }
 
+/// The saved stations only (no directory calls), for the side panel.
+#[tauri::command]
+pub async fn radio_favorites(state: State<'_, AppState>) -> Res<Vec<Station>> {
+    let lib = state.lib.clone();
+    blocking(move || lib.favorite_stations()).await
+}
+
 #[tauri::command]
 pub async fn radio_favorite(state: State<'_, AppState>, station: Station, on: bool) -> Res<()> {
     state.lib.set_station_favorite(&station, on).map_err(|e| e.to_string())
@@ -95,26 +102,28 @@ fn device_id(lib: &lt_core::Library) -> String {
 }
 
 /// Subsonic, Jellyfin/Emby and WebDAV: checks the server and sign-in first, then saves the connection.
+/// An address without http:// or https:// tries https first (plain http only for a server at home). A
+/// plain http:// address outside the home network is refused unless the person confirmed `allow_insecure`
+/// after being told the password or token would travel unencrypted.
 #[tauri::command]
-pub async fn connection_add(app: AppHandle, state: State<'_, AppState>, kind: String, name: String, url: String, username: String, password: String, in_library: Option<bool>) -> Res<String> {
+pub async fn connection_add(app: AppHandle, state: State<'_, AppState>, kind: String, name: String, url: String, username: String, password: String, in_library: Option<bool>, allow_insecure: Option<bool>) -> Res<String> {
     let lib = state.lib.clone();
     let msg = blocking(move || {
-        let base = remote::normalize_url(&url)?;
+        let base = remote::pick_scheme(&url)?;
+        if remote::is_insecure(&base) && !allow_insecure.unwrap_or(false) {
+            anyhow::bail!("{base} uses plain http:// and isn't on your home network, so your password or token would travel unencrypted. Use the https:// address, or confirm to connect anyway.");
+        }
         let (secret, extra, server) = match kind.as_str() {
             "jellyfin" => lt_core::remote_jellyfin::sign_in(&base, &username, &password, &device_id(&lib))?,
-            "subsonic" | "webdav" => {
-                let mut probe = remote::Connection { id: 0, kind: kind.clone(), name: name.clone(), base_url: base.clone(), username: username.clone(), extra: serde_json::json!({}) };
-                let first = remote::server(&probe, &password)?.ping();
-                match first {
-                    Ok(server) => (password.clone(), serde_json::json!({}), server),
-                    // Some Subsonic servers (Nextcloud Music, LDAP setups) refuse token sign-in; try the plain one.
-                    Err(e) if kind == "subsonic" => {
-                        probe.extra = serde_json::json!({"legacyAuth": true});
-                        let server = remote::server(&probe, &password)?.ping().map_err(|_| e)?;
-                        (password.clone(), serde_json::json!({"legacyAuth": true}), server)
-                    }
-                    Err(e) => return Err(e),
-                }
+            "subsonic" => {
+                let probe = remote::Connection { id: 0, kind: kind.clone(), name: name.clone(), base_url: base.clone(), username: username.clone(), extra: serde_json::json!({}) };
+                // Token sign-in; the plain one only when the server says it takes no tokens (Nextcloud Music, LDAP).
+                let (extra, server) = lt_core::remote_subsonic::connect(&probe, &password)?;
+                (password.clone(), extra, server)
+            }
+            "webdav" => {
+                let probe = remote::Connection { id: 0, kind: kind.clone(), name: name.clone(), base_url: base.clone(), username: username.clone(), extra: serde_json::json!({}) };
+                (password.clone(), serde_json::json!({}), remote::server(&probe, &password)?.ping()?)
             }
             "plex" => anyhow::bail!("Plex connects with the Sign in with Plex button"),
             k => anyhow::bail!("Unknown kind of connection: {k}"),
@@ -137,8 +146,9 @@ pub async fn connection_remove(app: AppHandle, state: State<'_, AppState>, id: i
     if let Ok(k) = key_entry(id) {
         let _ = k.delete_credential();
     }
-    state.lib.remove_remote_songs(id).map_err(|e| e.to_string())?;
+    // The connection goes first: a sync still running then can't add its songs back (sync_remote_songs checks).
     state.lib.remove_connection(id).map_err(|e| e.to_string())?;
+    state.lib.remove_remote_songs(id).map_err(|e| e.to_string())?;
     crate::emit_library_changed(&app);
     Ok(())
 }
@@ -247,6 +257,8 @@ pub fn start_library_sync(app: &AppHandle, id: i64, force: bool) {
                 send("done", format!("{} songs in My music ({} new, {} gone{})", r.added + r.updated, r.added, r.removed, if r.local > 0 { format!(", {} already local", r.local) } else { String::new() }));
                 crate::emit_library_changed(&app);
             }
+            // Removed or taken out of My music while it ran: nothing was added, nothing to report.
+            Err(_) if !state.lib.connection(id).is_ok_and(|c| c.extra["inLibrary"].as_bool() == Some(true)) => send("stopped", "Stopped".into()),
             Err(e) => {
                 crate::log::write("error", &format!("server sync {id}: {e:#}"));
                 send("error", format!("{e:#}"));
@@ -271,7 +283,8 @@ pub async fn remote_library_sync(app: AppHandle, id: i64) -> Res<()> {
     Ok(())
 }
 
-/// Turns "In My music" on (adds the server's songs) or off (takes them out).
+/// Turns "In My music" on (adds the server's songs) or off (takes them out). Off is saved before the songs
+/// are taken out, so a sync still running can't add them back.
 #[tauri::command]
 pub async fn connection_set_in_library(app: AppHandle, state: State<'_, AppState>, id: i64, on: bool) -> Res<()> {
     state.lib.set_connection_extra(id, "inLibrary", serde_json::Value::Bool(on)).map_err(|e| e.to_string())?;

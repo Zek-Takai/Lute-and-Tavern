@@ -113,7 +113,7 @@ fn src_label(s: &Song) -> &'static str {
 }
 
 fn playable(s: &Song) -> bool {
-    s.provider == "apple" || s.has_audio || s.stems > 0 || s.notes.as_array().is_some_and(|n| !n.is_empty())
+    !s.missing && (s.provider == "apple" || s.has_audio || s.stems > 0 || s.notes.as_array().is_some_and(|n| !n.is_empty()))
 }
 
 fn row(s: &Song) -> Value {

@@ -46,6 +46,12 @@ impl Library {
         Ok(())
     }
 
+    /// Forgets what was sent to a connection (its backup folder changed: everything goes to the new place).
+    pub fn reset_backup_manifest(&self, conn: i64) -> Result<()> {
+        self.db().execute("DELETE FROM backup_files WHERE conn_id = ?1", [conn])?;
+        Ok(())
+    }
+
     fn backup_forget(&self, conn: i64, rel: &str) -> Result<()> {
         self.db().execute("DELETE FROM backup_files WHERE conn_id = ?1 AND rel = ?2", params![conn, rel])?;
         Ok(())

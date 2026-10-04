@@ -110,7 +110,11 @@ export function renderSheet(b: HTMLElement, s: SongDetail, afterChange: () => Pr
   };
   b.querySelectorAll<HTMLElement>('[data-rm-sheet]').forEach((x) => (x.onclick = async () => {
     const id = Number(x.dataset.rmSheet);
-    await api.removeSheet(id).catch((e) => toast(errText(e)));
+    try {
+      await api.removeSheet(id);
+    } catch (e) {
+      return toast(errText(e));
+    }
     s.sheets = s.sheets.filter((f) => f.id !== id);
     renderSheet(b, s, afterChange);
   }));

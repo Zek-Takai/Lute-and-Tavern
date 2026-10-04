@@ -1,12 +1,59 @@
 //! Subsonic API (OpenSubsonic): Navidrome, Airsonic, Gonic, Ampache, Funkwhale, Lyrion, many NAS music apps.
 //! Signs in with a salted token, so the password itself is never sent. Servers that refuse tokens (Nextcloud
 //! Music, LDAP-backed servers) use the API's plain-password sign-in instead, recorded per connection as
-//! `legacyAuth` when the connection is added (only sensible over HTTPS).
+//! `legacyAuth` when the connection is added. That happens only when the server answers that it doesn't
+//! accept tokens (error 41 or 42), never after a wrong password or a network error, and never over plain
+//! http outside the home network, because the plain-password sign-in can be read by anyone on the way.
 
-use crate::remote::{Connection, MusicServer, RemoteItem, RemoteSearch, Target, http, list, text};
+use crate::remote::{Connection, MusicServer, RemoteItem, RemoteSearch, Target, http, is_insecure, list, text};
 use anyhow::{Result, anyhow, bail};
 use md5::{Digest, Md5};
 use serde_json::Value;
+
+/// An error the server itself answered with (Subsonic error codes: 40 wrong username or password,
+/// 41 token sign-in not supported for this user, 42 this way of signing in not supported, ...).
+#[derive(Debug)]
+pub struct SubsonicError {
+    pub server: String,
+    pub code: i64,
+    pub message: String,
+}
+
+impl std::fmt::Display for SubsonicError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.server, self.message)
+    }
+}
+
+impl std::error::Error for SubsonicError {}
+
+/// Whether a failed sign-in was the server saying it doesn't accept the salted-token sign-in at all.
+pub fn refuses_tokens(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<SubsonicError>().is_some_and(|s| matches!(s.code, 41 | 42))
+}
+
+const PLAIN_PASSWORD_OVER_HTTP: &str = "This server only accepts the older sign-in, which sends the password in a form anyone on the way can read. \
+     Over plain http:// outside your home network that isn't safe. Use the server's https:// address instead.";
+
+/// Checks the address and sign-in of a new connection. Uses the salted-token sign-in; only when the server
+/// answers that it doesn't take tokens does it try the plain-password one (refused over insecure http).
+/// Returns the details to keep with the connection and a description of the server.
+pub fn connect(conn: &Connection, password: &str) -> Result<(Value, String)> {
+    let mut probe = conn.clone();
+    probe.extra = serde_json::json!({});
+    match (Subsonic { conn: &probe, password }).ping() {
+        Ok(server) => Ok((serde_json::json!({}), server)),
+        Err(e) if refuses_tokens(&e) => {
+            if is_insecure(&conn.base_url) {
+                bail!("{PLAIN_PASSWORD_OVER_HTTP}");
+            }
+            probe.extra = serde_json::json!({"legacyAuth": true});
+            let server = (Subsonic { conn: &probe, password }).ping()?;
+            Ok((serde_json::json!({"legacyAuth": true}), server))
+        }
+        Err(e) => Err(e),
+    }
+}
 
 pub struct Subsonic<'a> {
     pub conn: &'a Connection,
@@ -20,7 +67,7 @@ impl Subsonic<'_> {
         {
             let mut q = u.query_pairs_mut();
             q.append_pair("u", &self.conn.username);
-            if self.conn.extra["legacyAuth"].as_bool().unwrap_or(false) {
+            if self.legacy() {
                 let hex: String = self.password.bytes().map(|b| format!("{b:02x}")).collect();
                 q.append_pair("p", &format!("enc:{hex}"));
             } else {
@@ -36,16 +83,33 @@ impl Subsonic<'_> {
         u.to_string()
     }
 
+    fn legacy(&self) -> bool {
+        self.conn.extra["legacyAuth"].as_bool().unwrap_or(false)
+    }
+
+    /// A signed address, refused when it would carry the plain password over insecure http.
+    fn signed(&self, method: &str, extra: &[(&str, &str)]) -> Result<String> {
+        if self.legacy() && is_insecure(&self.conn.base_url) {
+            bail!("{PLAIN_PASSWORD_OVER_HTTP}");
+        }
+        Ok(self.url(method, extra))
+    }
+
     fn call(&self, method: &str, extra: &[(&str, &str)]) -> Result<Value> {
         let res = http()?
-            .get(self.url(method, extra))
+            .get(self.signed(method, extra)?)
             .send()
             .map_err(|e| anyhow!("Could not reach {}: {}", self.conn.base_url, e.without_url()))?;
         let status = res.status();
         let v: Value = res.json().map_err(|_| anyhow!("{} answered {status} but not as a Subsonic music server", self.conn.base_url))?;
         let r = &v["subsonic-response"];
         if r["status"] != "ok" {
-            bail!("{}: {}", self.conn.name, r["error"]["message"].as_str().unwrap_or("unknown error"));
+            return Err(SubsonicError {
+                server: self.conn.name.clone(),
+                code: r["error"]["code"].as_i64().unwrap_or(0),
+                message: r["error"]["message"].as_str().unwrap_or("unknown error").to_string(),
+            }
+            .into());
         }
         Ok(r.clone())
     }
@@ -131,11 +195,11 @@ impl MusicServer for Subsonic<'_> {
     }
 
     fn stream(&self, song_id: &str) -> Result<Target> {
-        Ok(Target::plain(self.url("stream.view", &[("id", song_id), ("format", "raw")])))
+        Ok(Target::plain(self.signed("stream.view", &[("id", song_id), ("format", "raw")])?))
     }
 
     fn cover(&self, cover: &str, size: u32) -> Option<Target> {
-        Some(Target::plain(self.url("getCoverArt.view", &[("id", cover), ("size", &size.to_string())])))
+        Some(Target::plain(self.signed("getCoverArt.view", &[("id", cover), ("size", &size.to_string())]).ok()?))
     }
 }
 
@@ -187,6 +251,66 @@ mod tests {
         let c = Connection { id: 1, kind: "subsonic".into(), name: "NC".into(), base_url: "https://nas:8090/apps/music/subsonic".into(), username: "listener".into(), extra: serde_json::json!({"legacyAuth": true}) };
         let u = Subsonic { conn: &c, password: "ab" }.url("ping.view", &[]);
         assert!(u.contains("u=listener&p=enc%3A6162") && !u.contains("&t="), "{u}");
+    }
+
+    /// A Subsonic server that accepts only `password`, and (if `tokens` is false) only the plain sign-in.
+    fn fake(password: &'static str, tokens: bool) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            for req in server.incoming_requests() {
+                let url = req.url().to_string();
+                log.lock().unwrap().push(url.clone());
+                let q: std::collections::HashMap<String, String> = reqwest::Url::parse(&format!("http://x{url}")).unwrap().query_pairs().into_owned().collect();
+                let r = if let Some(p) = q.get("p") {
+                    let hex: String = password.bytes().map(|b| format!("{b:02x}")).collect();
+                    if *p == format!("enc:{hex}") { json!({"status": "ok", "type": "fake", "version": "1.16.1"}) } else { json!({"status": "failed", "error": {"code": 40, "message": "Wrong username or password"}}) }
+                } else if !tokens {
+                    json!({"status": "failed", "error": {"code": 41, "message": "Token authentication not supported"}})
+                } else {
+                    let ok = q.get("t").map(String::as_str) == Some(&format!("{:x}", Md5::digest(format!("{password}{}", q["s"]).as_bytes())));
+                    if ok { json!({"status": "ok", "type": "fake", "version": "1.16.1"}) } else { json!({"status": "failed", "error": {"code": 40, "message": "Wrong username or password"}}) }
+                };
+                let _ = req.respond(tiny_http::Response::from_string(json!({"subsonic-response": r}).to_string()));
+            }
+        });
+        (format!("http://127.0.0.1:{port}"), seen)
+    }
+
+    fn conn(base: &str) -> Connection {
+        Connection { id: 0, kind: "subsonic".into(), name: "Home".into(), base_url: base.into(), username: "listener".into(), extra: json!({}) }
+    }
+
+    #[test]
+    fn plain_password_sign_in_only_when_the_server_refuses_tokens() {
+        // tokens work: no fallback
+        let (base, seen) = fake("hunter2", true);
+        let (extra, _) = connect(&conn(&base), "hunter2").unwrap();
+        assert!(extra["legacyAuth"].is_null());
+        // a wrong password never retries with the plain one
+        let err = connect(&conn(&base), "wrong").unwrap_err();
+        assert!(!refuses_tokens(&err) && err.to_string().contains("Wrong username"), "{err}");
+        assert!(seen.lock().unwrap().iter().all(|u| !u.contains("p=")), "the password was never sent");
+        // a server that answers 41 gets the plain sign-in (local http is fine)
+        let (base, _) = fake("hunter2", false);
+        let (extra, _) = connect(&conn(&base), "hunter2").unwrap();
+        assert_eq!(extra["legacyAuth"], json!(true));
+        // a network error never falls back
+        let err = connect(&conn("http://127.0.0.1:9"), "hunter2").unwrap_err();
+        assert!(!refuses_tokens(&err));
+    }
+
+    #[test]
+    fn plain_password_never_goes_over_insecure_http() {
+        let refused = anyhow::Error::from(SubsonicError { server: "x".into(), code: 41, message: "no tokens".into() });
+        assert!(refuses_tokens(&refused));
+        assert!(!refuses_tokens(&anyhow::Error::from(SubsonicError { server: "x".into(), code: 40, message: "wrong".into() })));
+        let c = Connection { extra: json!({"legacyAuth": true}), ..conn("http://music.example.com:4533") };
+        let s = Subsonic { conn: &c, password: "hunter2" };
+        assert!(s.ping().unwrap_err().to_string().contains("https://"));
+        assert!(s.stream("1").is_err() && s.cover("1", 300).is_none());
     }
 
     #[test]

@@ -57,11 +57,11 @@ fn get(path: &str, query: &[(&str, String)]) -> Result<Vec<Value>> {
         let mut url = reqwest::Url::parse(&format!("https://{host}{path}"))?;
         url.query_pairs_mut().extend_pairs(query.iter().map(|(k, v)| (*k, v.as_str())));
         match c.get(url).send().and_then(|r| r.error_for_status()) {
-            Ok(r) => return r.json::<Vec<Value>>().context("Radio Browser sent something unexpected"),
+            Ok(r) => return r.json::<Vec<Value>>().map_err(|e| e.without_url()).context("Radio Browser sent something unexpected"),
             Err(e) => last = Some(e),
         }
     }
-    bail!("Could not reach the radio directory: {}", last.map(|e| e.to_string()).unwrap_or_default())
+    bail!("Could not reach the radio directory: {}", last.map(|e| e.without_url().to_string()).unwrap_or_default())
 }
 
 fn station(v: &Value) -> Option<Station> {

@@ -15,6 +15,8 @@ export interface Song {
   track: number | null;
   duration: number | null;
   hasAudio: boolean;
+  /** Its file can't be found right now (moved away, or the drive is offline). */
+  missing?: boolean;
   art: string | null;
   addedAt: number;
   updatedAt: number;
@@ -82,10 +84,10 @@ export interface Message { role: 'user' | 'writer'; text: string; createdAt: num
 export interface Stem { id: number; name: string; format: string }
 export interface Sheet { id: number; name: string; kind: 'pdf' | 'image' | 'musicxml'; addedAt: number }
 export interface SongDetail extends Song { takes: Take[]; versions: Version[]; messages: Message[]; sheets: Sheet[]; playlists: number[]; stemFiles: Stem[] }
-export interface Playlist { id: number; name: string; songs: number[] }
+export interface Playlist { id: number; name: string; songs: number[]; missing: number }
 export interface GenreTag { id: number; name: string; origin: 'default' | 'user' | 'writer' | 'file'; songs: number }
 export interface Folder { id: number; path: string; managed: boolean }
-export interface ScanReport { added: number; updated: number; removed: number; untagged: number }
+export interface ScanReport { added: number; updated: number; removed: number; untagged: number; unreachable: string[] }
 export interface Snapshot { songs: Song[]; playlists: Playlist[]; genres: GenreTag[]; folders: Folder[]; settings: Record<string, unknown> }
 export interface WriterSettings { baseUrl: string; model: string; name: string; hasKey: boolean }
 export interface UpdateInfo { canUpdate: boolean; currentVersion: string; defaultUrl: string }
@@ -150,10 +152,11 @@ export const api = {
   syncReveal: (path: string) => invoke<void>('sync_reveal', { path }),
   radioSearch: (name: string, tag = '', country = '', limit = 60) => invoke<Station[]>('radio_search', { name, tag, country, limit }),
   radioHome: () => invoke<RadioHome>('radio_home'),
+  radioFavorites: () => invoke<Station[]>('radio_favorites'),
   radioFavorite: (station: Station, on: boolean) => invoke<void>('radio_favorite', { station, on }),
   radioPlay: (station: Station) => invoke<string>('radio_play', { station }),
   connections: () => invoke<Connection[]>('connections_list'),
-  connectionAdd: (kind: string, name: string, url: string, username: string, password: string, inLibrary: boolean) => invoke<string>('connection_add', { kind, name, url, username, password, inLibrary }),
+  connectionAdd: (kind: string, name: string, url: string, username: string, password: string, inLibrary: boolean, allowInsecure = false) => invoke<string>('connection_add', { kind, name, url, username, password, inLibrary, allowInsecure }),
   remoteLibrarySync: (id: number) => invoke<void>('remote_library_sync', { id }),
   connectionSetInLibrary: (id: number, on: boolean) => invoke<void>('connection_set_in_library', { id, on }),
   connectionRemove: (id: number) => invoke<void>('connection_remove', { id }),

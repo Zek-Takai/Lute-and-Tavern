@@ -200,6 +200,19 @@ const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE songs ADD COLUMN synced_from TEXT;
     "#,
+    // v13: a song whose file can't be found is kept (greyed out) instead of deleted, and comes back when the
+    // file does; tags the person edited in the app are no longer overwritten by the file's own tags.
+    r#"
+    ALTER TABLE songs ADD COLUMN missing_since INTEGER;
+    ALTER TABLE songs ADD COLUMN tags_edited INTEGER NOT NULL DEFAULT 0;
+    -- songs of a playlist from another device that aren't on this one (yet): kept in place and sent back
+    CREATE TABLE playlist_pending (
+        playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+        after_song  INTEGER,
+        seq         INTEGER NOT NULL,
+        entry       TEXT NOT NULL
+    );
+    "#,
 ];
 
 pub fn open(path: &std::path::Path) -> Result<Connection> {

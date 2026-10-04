@@ -1,6 +1,6 @@
 // Settings: the songwriter connection, music folders, genre tags and the sidebar's starting tab.
 import { audioDir, join } from '@tauri-apps/api/path';
-import { message, open as pickFolder } from '@tauri-apps/plugin-dialog';
+import { ask, message, open as pickFolder } from '@tauri-apps/plugin-dialog';
 import { api, errText, type McpInfo, type PlexServer, type SpeechSettings, type SyncSettings, type UpdateInfo, type BackupSettings, type BackupSchedule, type PlaylistSyncLast } from '../api';
 import { comboOf, DEFAULT_KEYS, keyLabel } from './assistant';
 import { connections, loadConnections, syncStatus } from './sources';
@@ -9,6 +9,30 @@ import { applePullText, runApplePull } from './apple';
 import { appleStatus, connectApple, disconnectApple, forgetAppleKey, isConnected, musicKit, setAppleKey, type AppleStatus } from '../apple';
 import { libraryFolder, reload, rerender, saveSetting, state } from '../state';
 import { $, copyText, esc, toast } from '../util';
+
+/** Whether a server address is on this computer, the home network (10/8, 172.16/12, 192.168/16, .local) or a
+ *  Tailscale network (100.64/10, .ts.net), where plain http doesn't cross the internet. Same rule as the app's
+ *  core (remote::is_local_host). */
+function isLocalHost(host: string): boolean {
+  const h = host.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.ts.net') || h === '::1') return true;
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h.replace(/^::ffff:/, ''));
+  if (!m) return false;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  return a === 127 || a === 10 || (a === 172 && b >= 16 && b < 32) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b < 128);
+}
+
+/** A typed address that starts with http:// and points outside the home network (sign-in would go unencrypted). */
+function plainHttpHost(raw: string): string | null {
+  const t = raw.trim();
+  if (!/^http:\/\//i.test(t)) return null;
+  try {
+    const host = new URL(t).hostname;
+    return isLocalHost(host) ? null : host;
+  } catch {
+    return null;
+  }
+}
 
 const ORIGIN: Record<string, string> = { default: 'Built in', user: 'Yours', writer: 'Made by the songwriter', file: 'From your music files' };
 
@@ -318,7 +342,7 @@ function render() {
            <div id="cPlexServers"></div>`
         : `<div class="form">
         <label for="cName">Name</label><input id="cName" placeholder="Home NAS">
-        <label for="cUrl">Address</label><input id="cUrl" placeholder="${addKind === 'webdav' ? 'https://nas.local:5006/music' : addKind === 'jellyfin' ? 'http://192.168.1.20:8096' : 'http://192.168.1.20:4533'}">
+        <label for="cUrl">Address</label><input id="cUrl" placeholder="${addKind === 'webdav' ? 'https://nas.local:5006/music' : addKind === 'jellyfin' ? 'https://music.example.com or 192.168.1.20:8096' : 'https://music.example.com or 192.168.1.20:4533'}">
         <label for="cUser">Username</label><input id="cUser" autocomplete="off">
         <label for="cPass">Password</label><input id="cPass" type="password" autocomplete="off">
       </div>
@@ -417,14 +441,19 @@ function render() {
     if (!r) return;
     await reload();
     rerender();
-    toast(r.added + r.updated + r.removed ? `${r.added} added, ${r.updated} updated, ${r.removed} removed` : 'Everything is up to date');
+    const off = r.unreachable.length ? ` ${r.unreachable.length === 1 ? 'One folder' : `${r.unreachable.length} folders`} couldn't be reached (an unplugged drive?); ${r.unreachable.length === 1 ? 'its' : 'their'} songs were left as they are.` : '';
+    toast((r.added + r.updated + r.removed ? `${r.added} added, ${r.updated} updated, ${r.removed} removed.` : 'Everything is up to date.') + off);
   });
   document.querySelectorAll<HTMLElement>('[data-rm-folder]').forEach((b) => (b.onclick = async () => {
-    await api.removeFolder(Number(b.dataset.rmFolder)).catch((e) => toast(errText(e)));
+    try {
+      await api.removeFolder(Number(b.dataset.rmFolder));
+    } catch (e) {
+      return toast(errText(e));
+    }
     await reload();
     rerender();
     render();
-    toast('Stopped watching that folder. Its songs left the library; the files are untouched.');
+    toast('Stopped watching that folder. Its songs left the library (songs you wrote here stay); the files are untouched.');
   }));
   document.querySelectorAll<HTMLInputElement>('[data-rename]').forEach((inp) => (inp.onchange = async () => {
     await api.renameGenre(Number(inp.dataset.rename), inp.value).catch((e) => toast(errText(e)));
@@ -719,9 +748,23 @@ function render() {
       $('#cStatus').textContent = 'That is a music-server address, so the kind was switched to Music server. Check the password is the Music API password, then Connect.';
       return;
     }
+    // Plain http:// outside the home network: say what that means and only go on when the person confirms.
+    const insecureHost = plainHttpHost(v('#cUrl'));
+    if (insecureHost) {
+      const go = await ask(
+        `${insecureHost} is not on your home network, and this address starts with http:// instead of https://.\n\n` +
+          `If you connect, your ${addKind === 'jellyfin' ? 'password and sign-in token' : 'password'} would travel unencrypted across the internet, where others could read it. ` +
+          `Your music would travel unencrypted too.\n\nIf the server has an https:// address, use that instead.`,
+        { title: 'This connection is not encrypted', kind: 'warning', okLabel: 'Connect anyway', cancelLabel: 'Cancel' },
+      );
+      if (!go) {
+        st('Not connected. Use the server\'s https:// address if it has one.');
+        return;
+      }
+    }
     st('Checking the server…');
     try {
-      const msg = await api.connectionAdd(addKind, v('#cName'), v('#cUrl'), v('#cUser'), v('#cPass'), $<HTMLInputElement>('#cInLib').checked);
+      const msg = await api.connectionAdd(addKind, v('#cName'), v('#cUrl'), v('#cUser'), v('#cPass'), $<HTMLInputElement>('#cInLib').checked, insecureHost !== null);
       await loadConnections();
       render();
       toast(msg);

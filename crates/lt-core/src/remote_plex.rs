@@ -2,7 +2,7 @@
 //! (`start_login` / `check_login`), then `servers` lists the Plex servers on their account with every
 //! address each can be reached at. Music is read through the server's own API; audio is the original file.
 
-use crate::remote::{Connection, MusicServer, RemoteItem, RemoteSearch, Target, get_json, http, text};
+use crate::remote::{Connection, MusicServer, RemoteItem, RemoteSearch, Target, get_json, http, net, text};
 use anyhow::{Result, anyhow, bail};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -37,7 +37,7 @@ pub fn start_login(client: &str) -> Result<Login> {
     for (k, v) in plex_headers(client, None) {
         req = req.header(k, v);
     }
-    let v: Value = req.send()?.error_for_status()?.json()?;
+    let v: Value = req.send().map_err(net)?.error_for_status().map_err(net)?.json().map_err(net)?;
     let (id, code) = (v["id"].as_i64().ok_or_else(|| anyhow!("plex.tv sent no sign-in id"))?, text(&v, "code"));
     let mut u = reqwest::Url::parse("https://app.plex.tv/auth#")?;
     let frag = reqwest::Url::parse_with_params(

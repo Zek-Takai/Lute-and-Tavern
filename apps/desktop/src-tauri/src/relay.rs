@@ -10,7 +10,7 @@ use serde::Serialize;
 use std::io::Read;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use tiny_http::{Header, Request, Response, Server, StatusCode};
 
@@ -20,8 +20,13 @@ struct Relay {
 }
 
 static RELAY: OnceLock<Relay> = OnceLock::new();
-/// Addresses that need sign-in headers (connected servers), by short key; the page only ever sees the key.
-static TARGETS: Mutex<Option<HashMap<String, lt_core::remote::Target>>> = Mutex::new(None);
+/// Addresses that need sign-in headers (connected servers), by short key, with when each was last used; the
+/// page only ever sees the key. Kept to MAX_TARGETS, least recently used dropped first.
+static TARGETS: Mutex<Option<HashMap<String, (Instant, lt_core::remote::Target)>>> = Mutex::new(None);
+const MAX_TARGETS: usize = 4000;
+/// A stalled server (lost Wi-Fi, a station that died without closing) ends the stream after this long with
+/// no data, so its thread doesn't wait forever.
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn start(app: &AppHandle) -> Result<(), String> {
     let server = Server::http("127.0.0.1:0").map_err(|e| format!("stream relay: {e}"))?;
@@ -50,20 +55,46 @@ pub fn url_for(target: &str) -> String {
     format!("{}{}", base(), URL_SAFE_NO_PAD.encode(target))
 }
 
+/// The address without the parts that change on every call: a Subsonic address carries a fresh salt and
+/// token each time ("t" and "s"), so they are left out of the key.
+fn stable_address(url: &str) -> String {
+    let Ok(mut u) = reqwest::Url::parse(url) else { return url.to_string() };
+    let pairs: Vec<(String, String)> = u.query_pairs().into_owned().collect();
+    if !(u.path().contains("/rest/") && pairs.iter().any(|(k, _)| k == "t") && pairs.iter().any(|(k, _)| k == "s")) {
+        return url.to_string();
+    }
+    u.query_pairs_mut().clear().extend_pairs(pairs.iter().filter(|(k, _)| k != "t" && k != "s"));
+    u.to_string()
+}
+
+fn key_of(t: &lt_core::remote::Target) -> String {
+    use md5::{Digest, Md5};
+    let mut h = Md5::new();
+    h.update(stable_address(&t.url).as_bytes());
+    for (k, v) in &t.headers {
+        h.update(k.as_bytes());
+        h.update(v.as_bytes());
+    }
+    format!("{:x}", h.finalize())
+}
+
 /// Relay address for a connected server's file or cover. Always a short key, so neither sign-in headers nor
-/// sign-in details inside the address ever reach the page. The same target always gets the same key.
+/// sign-in details inside the address ever reach the page. The same song or cover always gets the same key
+/// (the newest signed address replaces the older one).
 pub fn register(t: lt_core::remote::Target) -> String {
-    let key = {
-        use md5::{Digest, Md5};
-        let mut h = Md5::new();
-        h.update(t.url.as_bytes());
-        for (k, v) in &t.headers {
-            h.update(k.as_bytes());
-            h.update(v.as_bytes());
+    let key = key_of(&t);
+    {
+        let mut guard = TARGETS.lock().unwrap();
+        let map = guard.get_or_insert_with(HashMap::new);
+        map.insert(key.clone(), (Instant::now(), t));
+        if map.len() > MAX_TARGETS {
+            let mut by_age: Vec<(Instant, String)> = map.iter().map(|(k, (at, _))| (*at, k.clone())).collect();
+            by_age.sort();
+            for (_, k) in by_age.into_iter().take(map.len() - MAX_TARGETS * 3 / 4) {
+                map.remove(&k);
+            }
         }
-        format!("{:x}", h.finalize())
-    };
-    TARGETS.lock().unwrap().get_or_insert_with(HashMap::new).insert(key.clone(), t);
+    }
     format!("{}k/{key}", base())
 }
 
@@ -98,7 +129,11 @@ fn serve(app: &AppHandle, req: Request) {
         return fail(req, 403, "forbidden");
     }
     let (target, extra_headers) = if let Some(key) = enc.strip_prefix("k/") {
-        match TARGETS.lock().unwrap().as_ref().and_then(|m| m.get(key).cloned()) {
+        let found = TARGETS.lock().unwrap().as_mut().and_then(|m| m.get_mut(key)).map(|(at, t)| {
+            *at = Instant::now();
+            t.clone()
+        });
+        match found {
             Some(t) => (t.url, t.headers),
             None => return fail(req, 404, "unknown stream"),
         }
@@ -112,24 +147,50 @@ fn serve(app: &AppHandle, req: Request) {
     if !matches!(url.scheme(), "http" | "https") {
         return fail(req, 400, "only http(s) streams");
     }
-    let client = match reqwest::blocking::Client::builder().connect_timeout(Duration::from_secs(15)).timeout(None).user_agent(concat!("LuteAndTavern/", env!("CARGO_PKG_VERSION"))).build() {
-        Ok(c) => c,
-        Err(e) => return fail(req, 502, &e.to_string()),
+    // A blocking client's timeout applies to each wait (the answer, then every read of the audio), not to
+    // the whole stream, so a live station plays on while a stalled one ends after READ_TIMEOUT.
+    let client = |signed: bool| {
+        let b = reqwest::blocking::Client::builder()
+            .connect_timeout(Duration::from_secs(15))
+            .timeout(READ_TIMEOUT)
+            .tcp_keepalive(Duration::from_secs(15))
+            .user_agent(concat!("LuteAndTavern/", env!("CARGO_PKG_VERSION")));
+        // Sign-in headers (X-Plex-Token, X-Emby-Token, ...) stay on their own server: redirects elsewhere stop
+        // here and are followed below without them.
+        if signed { b.redirect(lt_core::remote::same_server_redirects()) } else { b }.build()
     };
-    let mut up = client.get(url.clone());
-    for (k, v) in &extra_headers {
-        up = up.header(k.as_str(), v.as_str());
-    }
-    if let Some(r) = req.headers().iter().find(|h| h.field.equiv("Range")) {
-        up = up.header("Range", r.value.as_str());
-    }
-    if want_icy {
-        up = up.header("Icy-MetaData", "1");
-    }
-    let res = match up.send() {
+    let range = req.headers().iter().find(|h| h.field.equiv("Range")).map(|r| r.value.as_str().to_string());
+    let send = |to: &reqwest::Url, with_sign_in: bool| -> Result<reqwest::blocking::Response, String> {
+        let c = client(with_sign_in).map_err(|e| e.without_url().to_string())?;
+        let mut up = c.get(to.clone());
+        if with_sign_in {
+            for (k, v) in &extra_headers {
+                up = up.header(k.as_str(), v.as_str());
+            }
+        }
+        if let Some(r) = &range {
+            up = up.header("Range", r.as_str());
+        }
+        if want_icy {
+            up = up.header("Icy-MetaData", "1");
+        }
+        up.send().map_err(|e| e.without_url().to_string())
+    };
+    let signed = !extra_headers.is_empty();
+    let mut res = match send(&url, signed) {
         Ok(r) => r,
-        Err(e) => return fail(req, 502, &e.without_url().to_string()),
+        Err(e) => return fail(req, 502, &e),
     };
+    if signed {
+        if let Some(next) = lt_core::remote::cross_origin_redirect(&res) {
+            res = match send(&next, false) {
+                Ok(r) => r,
+                Err(e) => return fail(req, 502, &e),
+            };
+        }
+    }
+    // relative addresses in a playlist are relative to where it was finally served from
+    let url = res.url().clone();
     let code = res.status().as_u16();
     let ctype = res.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
     let get = |k: &str| res.headers().get(k).and_then(|v| v.to_str().ok()).map(String::from);
@@ -236,6 +297,21 @@ impl<R: Read, F: FnMut(String)> Read for IcyReader<R, F> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn subsonic_addresses_keep_one_key_and_old_ones_are_dropped() {
+        let t = |salt: &str| lt_core::remote::Target::plain(format!("http://nas:4533/rest/getCoverArt.view?u=listener&t=tok{salt}&s={salt}&v=1.16.1&c=LuteAndTavern&f=json&id=al-1&size=300"));
+        assert_eq!(key_of(&t("a")), key_of(&t("b")), "a fresh salt is the same cover");
+        let other = lt_core::remote::Target::plain("http://nas:4533/rest/getCoverArt.view?u=listener&t=x&s=y&id=al-2&size=300".into());
+        assert_ne!(key_of(&t("a")), key_of(&other));
+        let plex = |tok: &str| lt_core::remote::Target { url: "http://nas:32400/library/parts/1/file.mp3?t=1&s=2".into(), headers: vec![("X-Plex-Token".into(), tok.into())] };
+        assert_ne!(key_of(&plex("a")), key_of(&plex("b")), "only Subsonic sign-in parts are left out");
+        for i in 0..MAX_TARGETS + 10 {
+            register(lt_core::remote::Target::plain(format!("http://nas/cover/{i}")));
+        }
+        let len = TARGETS.lock().unwrap().as_ref().map(|m| m.len()).unwrap_or(0);
+        assert!(len <= MAX_TARGETS, "{len}");
+    }
 
     #[test]
     fn icy_titles_are_read_and_removed_from_the_audio() {

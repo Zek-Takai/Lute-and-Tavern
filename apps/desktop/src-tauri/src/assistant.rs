@@ -107,7 +107,7 @@ pub fn set_speech_settings(state: State<'_, AppState>, base_url: String, model: 
         if key.trim().is_empty() {
             let _ = entry.delete_credential();
         } else {
-            entry.set_password(key.trim()).map_err(|e| format!("Could not save the key in the keychain: {e}"))?;
+            entry.set_password(key.trim()).map_err(|e| format!("Could not save the key in the keychain: {e}{}", crate::secure::KEYRING_HINT))?;
         }
     }
     Ok(())

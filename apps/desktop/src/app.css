@@ -171,3 +171,6 @@ nav.rail { position: sticky; top: 16px; display: flex; flex-direction: column; a
 
 /* player bar artwork: a small square, the whole cover */
 .np-art{width:48px;height:48px;flex:none;border-radius:8px;background:var(--staff) center/cover no-repeat;border:1px solid var(--line)}
+
+/* a song whose file can't be found right now */
+.card.missing{opacity:.45;filter:grayscale(1)}

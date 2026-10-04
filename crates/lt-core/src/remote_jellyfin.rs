@@ -1,7 +1,7 @@
 //! Jellyfin and Emby (they share an API). Signs in once with the username and password to get an access
 //! token; only the token is kept (in the keychain). Audio is the original file.
 
-use crate::remote::{Connection, MusicServer, RemoteItem, RemoteSearch, Target, get_json, http, text};
+use crate::remote::{Connection, MusicServer, RemoteItem, RemoteSearch, Target, get_json, http, net, text};
 use anyhow::{Result, anyhow, bail};
 use serde_json::{Value, json};
 
@@ -38,7 +38,7 @@ pub fn sign_in(base_url: &str, username: &str, password: &str, device: &str) -> 
     if !res.status().is_success() {
         bail!("{base_url} answered {} (is this a Jellyfin or Emby server?)", res.status());
     }
-    let v: Value = res.json()?;
+    let v: Value = res.json().map_err(net)?;
     let token = text(&v, "AccessToken");
     let user = text(&v["User"], "Id");
     if token.is_empty() || user.is_empty() {
@@ -120,16 +120,16 @@ impl MusicServer for Jellyfin<'_> {
         Ok(format!("{} {}", text(&v, "ProductName"), text(&v, "Version")).trim().to_string())
     }
 
-    fn search(&self, q: &str) -> Result<RemoteSearch> {
-        let q = enc(q);
+    fn search(&self, raw: &str) -> Result<RemoteSearch> {
+        let q = enc(raw);
         let found = self.items(&format!("searchTerm={q}&IncludeItemTypes=Audio,MusicAlbum&Recursive=true&Limit=40"))?;
         let artists = items(&self.get(&format!("/Artists?searchTerm={q}&userId={}&Limit=8&{FIELDS}", self.user()))?["Items"]);
-        let ql = q.to_lowercase();
+        let ql = raw.trim().to_lowercase();
         Ok(RemoteSearch {
             songs: found.iter().filter(|i| i.kind == "song").cloned().collect(),
             albums: found.into_iter().filter(|i| i.kind == "album").collect(),
             artists: artists.into_iter().map(|a| RemoteItem { kind: "artist".into(), ..a }).collect(),
-            playlists: self.playlists()?.into_iter().filter(|p| enc(&p.name.to_lowercase()).contains(&ql)).collect(),
+            playlists: self.playlists()?.into_iter().filter(|p| p.name.to_lowercase().contains(&ql)).collect(),
             folders: vec![],
         })
     }
@@ -191,5 +191,25 @@ mod tests {
         assert_eq!((album.kind.as_str(), album.artist.as_str(), album.cover.as_deref(), album.count), ("album", "Linkin Park", Some("a1"), Some(13)));
         assert!(item(&json!({"Type": "Movie"})).kind.is_empty(), "video is ignored");
         assert!(auth_header("d", Some("t")).ends_with("Token=\"t\""));
+    }
+
+    #[test]
+    fn playlist_search_matches_accented_names() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        std::thread::spawn(move || {
+            for req in server.incoming_requests() {
+                let body = if req.url().contains("IncludeItemTypes=Playlist") {
+                    json!({"Items": [{"Id": "p1", "Type": "Playlist", "Name": "Café Mix", "MediaType": "Audio"}, {"Id": "p2", "Type": "Playlist", "Name": "Road", "MediaType": "Audio"}]})
+                } else {
+                    json!({"Items": []})
+                };
+                let _ = req.respond(tiny_http::Response::from_string(body.to_string()));
+            }
+        });
+        let c = Connection { id: 1, kind: "jellyfin".into(), name: "J".into(), base_url: format!("http://127.0.0.1:{port}"), username: String::new(), extra: json!({"user": "u"}) };
+        let j = Jellyfin { conn: &c, token: "t" };
+        let found = j.search("CAFÉ").unwrap().playlists;
+        assert_eq!(found.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["Café Mix"]);
     }
 }

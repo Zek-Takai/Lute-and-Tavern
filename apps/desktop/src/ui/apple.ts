@@ -6,7 +6,7 @@ import {
 } from '../apple';
 import { playSong, syncIcons } from '../player';
 import { reload, rerender, state } from '../state';
-import { $, contextMenu, esc, PLAY, toast } from '../util';
+import { $, contextMenu, cssUrl, esc, PLAY, toast } from '../util';
 import { pullAppleLibrary, externalOf, type ApplePull } from '../apple';
 import { saveSetting } from '../state';
 
@@ -17,7 +17,9 @@ let sec: AppleSec = 'search';
 let term = '';
 let opened: AppleItem | null = null;
 let page: Page | null = null;
-let busy = false;
+/** The page being loaded (see pageKey), so a rerender mid-load doesn't start it twice. */
+let loadingFor: string | null = null;
+let loadSeq = 0;
 let myPlaylists: AppleItem[] = [];
 
 /** Rows for the side panel when the Apple Music icon is open. */
@@ -118,6 +120,9 @@ export function appleHead() {
     ${sec === 'open' && page?.songs.length ? '<button class="btn small" id="aSavePl" title="Make a playlist of these songs in My music">Save as playlist</button>' : ''}`;
 }
 
+/** Which page the current section, opened item and search words ask for. */
+const pageKey = () => JSON.stringify([sec, opened?.type, opened?.id, sec === 'search' ? term.trim() : '']);
+
 async function load(): Promise<Page> {
   switch (sec) {
     case 'search': {
@@ -149,7 +154,7 @@ function songCard(it: AppleItem, i: number) {
   const s = toSong(it);
   const saved = savedFor(s);
   return `<article class="card apple" data-ai="${i}">
-    <div class="cover" style="${it.art ? `background-image:url('${it.art}')` : ''}"></div>
+    <div class="cover" style="${it.art ? `background-image:${esc(cssUrl(it.art))}` : ''}"></div>
     <div class="body"><h3>${esc(it.name)}</h3><div class="meta">${esc([it.artist, it.raw.attributes?.albumName].filter(Boolean).join(', '))}</div>
       <div class="foot"><span class="src src-apple">Apple Music</span><span style="margin-right:auto"></span>
         <button class="btn small" data-asave="${i}" ${saved ? 'disabled' : ''}>${saved ? 'Saved' : '+ Save'}</button>
@@ -158,7 +163,7 @@ function songCard(it: AppleItem, i: number) {
 }
 function boxCard(it: AppleItem, g: number, i: number) {
   return `<article class="card apple" data-open="${g}:${i}" tabindex="0" role="button" aria-label="Open ${esc(it.name)}">
-    <div class="cover" style="${it.art ? `background-image:url('${it.art}')` : ''}"></div>
+    <div class="cover" style="${it.art ? `background-image:${esc(cssUrl(it.art))}` : ''}"></div>
     <div class="body"><h3>${esc(it.name)}</h3><div class="meta">${esc(it.artist)}</div>
       <div class="foot"><span class="src src-apple">Apple Music</span></div></div></article>`;
 }
@@ -170,21 +175,28 @@ export async function renderAppleGrid() {
     grid.innerHTML = '<p class="empty">Connect Apple Music from the panel on the left to search and play here.</p>';
     return;
   }
-  if (!page && !busy) {
-    busy = true;
+  if (!page) {
+    const key = pageKey();
     grid.innerHTML = '<p class="empty">Loading Apple Music…</p>';
+    if (loadingFor === key) return;
+    loadingFor = key;
+    const seq = ++loadSeq;
+    let next: Page;
     try {
-      page = await load();
+      next = await load();
     } catch (e) {
-      busy = false;
-      grid.innerHTML = `<p class="empty">Apple Music could not load this: ${esc(errText(e))}</p>`;
+      if (seq !== loadSeq) return;
+      loadingFor = null;
+      if (state.view.kind === 'apple' && pageKey() === key) grid.innerHTML = `<p class="empty">Apple Music could not load this: ${esc(errText(e))}</p>`;
       return;
     }
-    busy = false;
+    // The person moved to another section or search meanwhile: that one has its own load.
+    if (seq !== loadSeq || pageKey() !== key) return;
+    loadingFor = null;
+    page = next;
     rerender();
     return;
   }
-  if (!page) return;
   const parts: string[] = [];
   if (page.songs.length) parts.push(page.songs.map(songCard).join(''));
   page.groups.forEach((g, gi) => {

@@ -5,7 +5,7 @@ import { appleStatus, findOnApple, isConnected as appleConnected, musicKit } fro
 import { playSong, syncIcons } from '../player';
 import { keyName, staffSVG, toMeasures } from '../music/notation';
 import { albums, genresInUse, inMainLibrary, isExternalView, playable, rerender, reload, saveSetting, stage, state, viewName, visible, writerName, type SideTab } from '../state';
-import { $, esc, hueOf, PLAY, toast } from '../util';
+import { $, cssUrl, esc, hueOf, PLAY, toast } from '../util';
 import { artUrl } from '../apple';
 import { appleHead, applePanel, handleApplePanelClick, openApplePage, renderAppleGrid } from './apple';
 import { openSong } from './song';
@@ -123,6 +123,7 @@ export function renderHead() {
   $('#viewHead').innerHTML =
     title +
     `<span class="meta">${list.length} song${list.length === 1 ? '' : 's'}</span>` +
+    (p?.missing ? `<span class="meta" title="Songs from your other devices that aren't in this library yet. They stay in the playlist and show up here once you have them.">${p.missing} not on this device</span>` : '') +
     (list.some(playable) ? `<button class="btn small" id="playAll">${PLAY.replace('<svg', '<svg width="12" height="12"')}Play all</button>` : '') +
     (p ? '<button class="btn small" id="plDel">Delete playlist</button>' : '');
 }
@@ -151,8 +152,8 @@ export function sourceBadge(s: Song) {
 }
 
 function cover(s: Song) {
-  if (s.art) return `<div class="cover" style="background-image:url('${lt('art', s.art)}')"></div>`;
-  if (s.artUrl) return `<div class="cover" style="background-image:url('${artUrl(s.artUrl)}')"></div>`;
+  if (s.art) return `<div class="cover" style="background-image:${esc(cssUrl(lt('art', s.art)))}"></div>`;
+  if (s.artUrl) return `<div class="cover" style="background-image:${esc(cssUrl(artUrl(s.artUrl)!))}"></div>`;
   if (s.source === 'ai' && s.status === 'writing' && !s.lyrics) return `<div class="staff"><div class="placeholder">${esc(writerName())} is writing…</div></div>`;
   if (s.notes.length)
     return `<div class="staff">${staffSVG(toMeasures(s.notes).slice(0, 2), { g: 6.5, W: 300, lyrics: false, timesig: false, chords: s.chords, title: s.title })}</div>`;
@@ -179,7 +180,7 @@ export function renderGrid() {
           const sub = s.source === 'ai'
             ? writing ? esc((s.request ?? '').slice(0, 70)) + ((s.request ?? '').length > 70 ? '…' : '') : [s.subGenre, keyName(s.key), s.bpm ? `${s.bpm} BPM` : ''].filter(Boolean).map(esc).join(', ')
             : esc([s.artist, s.album].filter(Boolean).join(', '));
-          return `<article class="card${writing ? ' writing' : ''}" tabindex="0" role="button" data-id="${s.id}" aria-label="Open ${esc(s.title)}">
+          return `<article class="card${writing ? ' writing' : ''}${s.missing ? ' missing' : ''}" tabindex="0" role="button" data-id="${s.id}" aria-label="Open ${esc(s.title)}"${s.missing ? ' title="Its file can\'t be found right now (moved, or the drive is offline). It comes back when the file does."' : ''}>
         ${cover(s)}
         <div class="body">
           <h3>${esc(s.title)}</h3>
@@ -318,7 +319,11 @@ export function initLibrary(actions: { addFolder: () => void; request: () => voi
     }
     if (t.closest('#plDel') && state.view.kind === 'pl') {
       const id = state.view.id, name = state.playlists.find((p) => p.id === id)?.name;
-      await api.deletePlaylist(id).catch((err) => toast(errText(err)));
+      try {
+        await api.deletePlaylist(id);
+      } catch (err) {
+        return toast(errText(err));
+      }
       state.view = { kind: 'all' };
       await reload();
       rerender();

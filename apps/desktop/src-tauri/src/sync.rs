@@ -17,6 +17,9 @@ const KEY_USER: &str = "syncthing-api-key";
 #[derive(Default)]
 pub struct Hook {
     pending: Mutex<(Vec<PathBuf>, bool)>,
+    /// The person's sync command is running; changes meanwhile wait for one follow-up run.
+    running: std::sync::atomic::AtomicBool,
+    queued: Mutex<Option<Vec<PathBuf>>>,
     last_run: Mutex<Option<CommandRun>>,
     quiet_until: Mutex<Option<Instant>>,
 }
@@ -48,12 +51,34 @@ fn fire(app: &AppHandle, changed: Vec<PathBuf>) -> Result<String, String> {
             Ok("Asked Syncthing to sync now".into())
         }
         "command" => {
+            use std::sync::atomic::Ordering;
             let cmd = state.lib.setting_str("syncCommand").ok_or("Add the command to run first.")?;
-            let run = sync::run_command(&cmd, &root, &changed, Duration::from_secs(30 * 60));
-            let msg = if run.ok { "Sync command finished".to_string() } else { format!("Sync command failed: {}", run.output.lines().last().unwrap_or("")) };
             let hook = app.state::<Hook>();
-            *hook.quiet_until.lock().unwrap() = Some(Instant::now() + Duration::from_secs(15));
-            *hook.last_run.lock().unwrap() = Some(run);
+            if hook.running.swap(true, Ordering::SeqCst) {
+                hook.queued.lock().unwrap().get_or_insert_with(Vec::new).extend(changed);
+                return Ok("A sync is already running; these changes go with the next one".into());
+            }
+            let mut changed = changed;
+            let msg = loop {
+                let run = sync::run_command(&cmd, &root, &changed, Duration::from_secs(30 * 60));
+                let msg = if run.ok { "Sync command finished".to_string() } else { format!("Sync command failed: {}", run.output.lines().last().unwrap_or("")) };
+                *hook.quiet_until.lock().unwrap() = Some(Instant::now() + Duration::from_secs(15));
+                *hook.last_run.lock().unwrap() = Some(run);
+                match hook.queued.lock().unwrap().take() {
+                    Some(mut next) => {
+                        next.sort();
+                        next.dedup();
+                        changed = next;
+                    }
+                    None => break msg,
+                }
+            };
+            hook.running.store(false, Ordering::SeqCst);
+            // changes that arrived as the last run ended
+            let late = hook.queued.lock().unwrap().take();
+            if let Some(next) = late {
+                return fire(app, next);
+            }
             Ok(msg)
         }
         "folder" => Ok("Your sync app picks up changes in this folder by itself".into()),
@@ -126,7 +151,7 @@ pub fn set_sync_settings(state: State<'_, AppState>, kind: String, address: Stri
         if k.trim().is_empty() {
             let _ = entry.delete_credential();
         } else {
-            entry.set_password(k.trim()).map_err(|e| format!("Could not save the key in the keychain: {e}"))?;
+            entry.set_password(k.trim()).map_err(|e| format!("Could not save the key in the keychain: {e}{}", crate::secure::KEYRING_HINT))?;
         }
     }
     Ok(())

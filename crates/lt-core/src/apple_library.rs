@@ -62,6 +62,17 @@ fn own_copy(own: &HashMap<String, Vec<(i64, Option<f64>)>>, e: &ExternalSong) ->
     c.iter().find(|(_, d)| matches!((d, e.duration), (Some(a), Some(b)) if (a - b).abs() <= 3.0)).or_else(|| c.iter().find(|(_, d)| d.is_none() || e.duration.is_none())).map(|(id, _)| *id)
 }
 
+fn fingerprint(p: &ApplePlaylist) -> String {
+    use md5::{Digest, Md5};
+    let mut h = Md5::new();
+    h.update(p.name.as_bytes());
+    for t in &p.tracks {
+        h.update(b"\0");
+        h.update(t.provider_id.as_bytes());
+    }
+    format!("{:x}", h.finalize())
+}
+
 impl Library {
     /// Saves an Apple song (or finds it), marking it as part of the Apple library when `from_library`.
     fn put_apple_song(&self, e: &ExternalSong, from_library: bool) -> Result<(i64, bool)> {
@@ -74,9 +85,7 @@ impl Library {
             params![e.provider_id, e.title, e.artist, e.album, e.year, genre, e.track, e.duration, e.art_url, e.added.unwrap_or(t), t, from_library.then_some(SYNCED_FROM)],
         )?;
         let id: i64 = db.query_row("SELECT id FROM songs WHERE provider = 'apple' AND provider_id = ?1", [&e.provider_id], |r| r.get(0))?;
-        if n == 0 && from_library {
-            db.execute("UPDATE songs SET synced_from = ?2 WHERE id = ?1 AND synced_from IS NULL", params![id, SYNCED_FROM])?;
-        }
+        // A song saved by hand stays the person's, even when it's in their Apple library too.
         Ok((id, n > 0))
     }
 
@@ -100,7 +109,7 @@ impl Library {
             r.added += new as usize;
         }
 
-        let pulled: HashMap<String, i64> = {
+        let pulled: HashMap<String, String> = {
             let m = self.settings()?;
             m.get("applePlaylistsPulled").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default()
         };
@@ -109,10 +118,11 @@ impl Library {
             let uuid = format!("apple-{}", p.id);
             let exists: bool = self.db().query_row("SELECT COUNT(*) FROM playlists WHERE uuid = ?1", [&uuid], |r| r.get::<_, i64>(0))? > 0;
             let deleted: bool = self.db().query_row("SELECT COUNT(*) FROM playlist_tombstones WHERE uuid = ?1", [&uuid], |r| r.get::<_, i64>(0))? > 0;
-            let modified = p.modified.unwrap_or(0);
-            // Unchanged in Apple Music since the last pull: leave the person's own edits alone. Deleted
-            // here: stays deleted until it changes in Apple Music.
-            if pulled.get(&p.id).is_some_and(|m| *m >= modified && modified > 0) && (exists || deleted) {
+            // Apple gives no change date for library playlists, so a fingerprint of its name and songs says
+            // whether it changed there. Unchanged since the last pull: the person's own edits here stay, and a
+            // playlist they deleted here stays deleted.
+            let print = fingerprint(p);
+            if pulled.get(&p.id).is_some_and(|m| *m == print) && (exists || deleted) {
                 for e in &p.tracks {
                     if let Some(id) = ids_by_provider.get(&e.provider_id) {
                         keep.insert(*id);
@@ -134,13 +144,16 @@ impl Library {
                 }
             }
             self.set_playlist_by_uuid(&uuid, &p.name, &ids)?;
-            seen.insert(p.id.clone(), modified);
+            seen.insert(p.id.clone(), print);
             r.playlists_updated += 1;
         }
         self.set_setting("applePlaylistsPulled", &serde_json::to_value(&seen)?)?;
 
         // Songs that left the Apple library: gone here too, unless a playlist holds them (then they stay as
-        // a saved song).
+        // a saved song). An empty answer is not trusted to mean "they removed everything".
+        if songs.is_empty() {
+            return Ok(r);
+        }
         let db = self.db();
         let gone: Vec<i64> = {
             let mut st = db.prepare("SELECT id FROM songs WHERE provider = 'apple' AND synced_from = ?1")?;
@@ -243,6 +256,14 @@ mod tests {
         l.pull_apple_library(&songs, &[pl.clone()]).unwrap();
         assert_eq!(l.playlists().unwrap().iter().find(|x| x.id == p.id).unwrap().songs.len(), 1);
 
+        // deleted here: stays deleted while it's unchanged in Apple Music
+        l.delete_playlist(p.id).unwrap();
+        l.pull_apple_library(&songs, &[pl.clone()]).unwrap();
+        assert!(l.playlists().unwrap().iter().all(|x| x.name != "Meteora"));
+        l.db().execute("DELETE FROM playlist_tombstones", []).unwrap();
+        l.pull_apple_library(&songs, &[pl.clone()]).unwrap();
+        let p = l.playlists().unwrap().into_iter().find(|x| x.name == "Meteora").unwrap();
+
         // "Lying from You" was removed in Apple Music and is in no playlist: it leaves; "Faint" stays (in a playlist)
         let r = l.pull_apple_library(&songs[..1], &[pl]).unwrap();
         assert_eq!(r.removed, 1);
@@ -252,6 +273,6 @@ mod tests {
         // adding to a playlist after a given song keeps import order
         let n = l.add_apple_to_playlist(p.id, &[(ext("7", "Somewhere I Belong", "Linkin Park", 213.0), None)]).unwrap();
         assert_eq!(n, 1);
-        assert_eq!(l.playlists().unwrap().iter().find(|x| x.id == p.id).unwrap().songs.len(), 2);
+        assert_eq!(l.playlists().unwrap().iter().find(|x| x.id == p.id).unwrap().songs.len(), p.songs.len() + 1);
     }
 }

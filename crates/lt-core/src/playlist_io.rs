@@ -11,7 +11,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlEntry {
     pub path: Option<String>,
@@ -403,7 +403,7 @@ pub fn best_match(e: &PlEntry, songs: &[Song]) -> Option<i64> {
     // 1. by file: a path inside one of the library's song folders
     if let Some(p) = &e.path {
         let p = p.to_lowercase();
-        if let Some(s) = songs.iter().find(|s| s.song_dir.as_deref().is_some_and(|d| p.starts_with(&d.to_lowercase()))) {
+        if let Some(s) = songs.iter().find(|s| s.song_dir.as_deref().is_some_and(|d| Path::new(&p).starts_with(d.to_lowercase()))) {
             return Some(s.id);
         }
     }

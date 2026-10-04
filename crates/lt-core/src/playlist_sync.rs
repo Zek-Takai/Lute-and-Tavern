@@ -5,7 +5,7 @@
 
 use crate::Song;
 use crate::library::{Library, now};
-use crate::playlist_io::{best_match, parse_m3u};
+use crate::playlist_io::{PlEntry, best_match, parse_m3u};
 use crate::remote_webdav::WebDav;
 use anyhow::Result;
 use rusqlite::params;
@@ -41,9 +41,17 @@ pub struct PlaylistSync {
 }
 
 struct LocalList {
+    id: i64,
     name: String,
     updated: i64,
     songs: Vec<i64>,
+}
+
+/// A song of a received playlist that isn't in this library: it keeps its place (after `after`, a song id,
+/// or at the start) and goes back out with the playlist, so devices with fewer songs never shorten it.
+struct Pending {
+    after: Option<i64>,
+    entry: PlEntry,
 }
 
 impl Library {
@@ -55,7 +63,7 @@ impl Library {
         let rows = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?)))?;
         Ok(rows
             .filter_map(|r| r.ok())
-            .map(|(id, uuid, name, updated)| (uuid, LocalList { name, updated, songs: songs.get(&id).cloned().unwrap_or_default() }))
+            .map(|(id, uuid, name, updated)| (uuid, LocalList { id, name, updated, songs: songs.get(&id).cloned().unwrap_or_default() }))
             .collect())
     }
 
@@ -65,8 +73,61 @@ impl Library {
         Ok(st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.filter_map(|r| r.ok()).collect())
     }
 
+    fn pending(&self, playlist: i64) -> Result<Vec<Pending>> {
+        let db = self.db();
+        let mut st = db.prepare("SELECT after_song, entry FROM playlist_pending WHERE playlist_id = ?1 ORDER BY seq")?;
+        let rows = st.query_map([playlist], |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, String>(1)?)))?;
+        Ok(rows.filter_map(|r| r.ok()).filter_map(|(after, e)| serde_json::from_str(&e).ok().map(|entry| Pending { after, entry })).collect())
+    }
+
+    fn set_pending(&self, playlist: i64, pending: &[Pending]) -> Result<()> {
+        let db = self.db();
+        db.execute("DELETE FROM playlist_pending WHERE playlist_id = ?1", [playlist])?;
+        for (seq, p) in pending.iter().enumerate() {
+            db.execute(
+                "INSERT INTO playlist_pending(playlist_id, after_song, seq, entry) VALUES (?1, ?2, ?3, ?4)",
+                params![playlist, p.after, seq as i64, serde_json::to_string(&p.entry)?],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Songs that arrived since (a scan, a server sync) take their place in the playlists that were waiting
+    /// for them. This doesn't count as an edit: the playlist is the same everywhere.
+    fn place_pending(&self, own: &[Song], apple: &[Song]) -> Result<()> {
+        let lists: Vec<i64> = {
+            let db = self.db();
+            let mut st = db.prepare("SELECT DISTINCT playlist_id FROM playlist_pending")?;
+            st.query_map([], |r| r.get(0))?.filter_map(|r| r.ok()).collect()
+        };
+        for pl in lists {
+            let pending = self.pending(pl)?;
+            let mut songs = self.playlists()?.into_iter().find(|p| p.id == pl).map(|p| p.songs).unwrap_or_default();
+            let mut still = Vec::new();
+            let mut placed = false;
+            for p in pending {
+                match best_match(&p.entry, own).or_else(|| best_match(&p.entry, apple)) {
+                    Some(id) if !songs.contains(&id) => {
+                        let at = p.after.and_then(|a| songs.iter().position(|x| *x == a)).map(|i| i + 1).unwrap_or(if p.after.is_some() { songs.len() } else { 0 });
+                        songs.insert(at, id);
+                        placed = true;
+                    }
+                    Some(_) => placed = true,
+                    None => still.push(p),
+                }
+            }
+            if placed {
+                let updated: i64 = self.db().query_row("SELECT updated_at FROM playlists WHERE id = ?1", [pl], |r| r.get(0))?;
+                self.set_playlist_songs(pl, &songs)?;
+                self.db().execute("UPDATE playlists SET updated_at = ?2 WHERE id = ?1", params![pl, updated])?;
+                self.set_pending(pl, &still)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Creates or replaces a playlist from another device, keeping its id and change time.
-    fn apply_playlist(&self, uuid: &str, name: &str, updated: i64, songs: &[i64]) -> Result<()> {
+    fn apply_playlist(&self, uuid: &str, name: &str, updated: i64, songs: &[i64], pending: &[Pending]) -> Result<()> {
         let existing: Option<i64> = {
             let db = self.db();
             db.query_row("SELECT id FROM playlists WHERE uuid = ?1", [uuid], |r| r.get(0)).ok()
@@ -83,6 +144,7 @@ impl Library {
             }
         };
         self.set_playlist_songs(id, songs)?;
+        self.set_pending(id, pending)?;
         let db = self.db();
         db.execute("UPDATE playlists SET updated_at = ?2 WHERE id = ?1", params![id, updated])?;
         db.execute("DELETE FROM playlist_tombstones WHERE uuid = ?1", [uuid])?;
@@ -107,8 +169,21 @@ fn file_name(name: &str, uuid: &str, used: &HashSet<String>) -> String {
 
 /// The .m3u8 text for a playlist: plain paths for local songs (relative to the Playlists folder), and #LT tags
 /// with each song's tags so another device can find it in its own library.
-fn render(lib: &Library, name: &str, songs: &[i64], all: &HashMap<i64, &Song>, root: Option<&Path>) -> String {
+fn render(lib: &Library, name: &str, songs: &[i64], pending: &[Pending], all: &HashMap<i64, &Song>, root: Option<&Path>) -> String {
     let mut out = format!("#EXTM3U\n#PLAYLIST:{name}\n");
+    let entry = |out: &mut String, e: &PlEntry| {
+        out.push_str(&format!("#EXTINF:{},{} - {}\n", e.duration.map(|d| d.round() as i64).unwrap_or(-1), e.artist, e.title));
+        out.push_str(&format!("#LT:{}\n", json!({"title": e.title, "artist": e.artist, "album": e.album, "duration": e.duration})));
+        out.push_str(&format!("{}\n", e.path.clone().unwrap_or_else(|| format!("lute-and-tavern:{}", e.title.replace(['\n', '\r'], " ")))));
+    };
+    // songs this device doesn't have go back out in their place; ones whose neighbour left go at the end
+    let placed = |after: Option<i64>| pending.iter().filter(move |p| p.after == after);
+    for p in placed(None) {
+        entry(&mut out, &p.entry);
+    }
+    for p in pending.iter().filter(|p| p.after.is_some_and(|a| !songs.contains(&a))) {
+        entry(&mut out, &p.entry);
+    }
     for id in songs {
         let Some(s) = all.get(id) else { continue };
         out.push_str(&format!("#EXTINF:{},{} - {}\n", s.duration.map(|d| d.round() as i64).unwrap_or(-1), s.artist, s.title));
@@ -116,6 +191,9 @@ fn render(lib: &Library, name: &str, songs: &[i64], all: &HashMap<i64, &Song>, r
         let file = lib.audio_path(s.id).ok().flatten();
         let local = root.and_then(|r| file.as_deref().and_then(|f| f.strip_prefix(r).ok()).map(|rel| format!("../{}", rel.to_string_lossy())));
         out.push_str(&format!("{}\n", local.unwrap_or_else(|| format!("lute-and-tavern:{}", s.title.replace(['\n', '\r'], " ")))));
+        for p in placed(Some(*id)) {
+            entry(&mut out, &p.entry);
+        }
     }
     out
 }
@@ -142,11 +220,17 @@ pub fn sync(lib: &Library, dav: &WebDav, folder: &str) -> Result<PlaylistSync> {
         p.push(file);
         dav.url_for(&p, false)
     };
-    let mut index: Index = dav.get_bytes(&at(INDEX))?.and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-    let locals = lib.local_lists()?;
-    let tombs = lib.tombstones()?;
+    // No index yet: start one. One that can't be read (a maintenance page, a cut-off upload) stops the sync,
+    // so deletions recorded in it are never lost.
+    let mut index: Index = match dav.get_bytes(&at(INDEX))? {
+        None => Index::default(),
+        Some(b) => serde_json::from_slice(&b).map_err(|_| anyhow::anyhow!("The playlist list on the server ({INDEX}) couldn't be read, so playlists weren't synced. If it stays this way, delete that file there and sync again."))?,
+    };
     let songs = lib.songs()?;
     let (apple, own): (Vec<Song>, Vec<Song>) = songs.iter().cloned().partition(|s| s.provider == "apple");
+    lib.place_pending(&own, &apple)?;
+    let locals = lib.local_lists()?;
+    let tombs = lib.tombstones()?;
     let by_id: HashMap<i64, &Song> = songs.iter().map(|s| (s.id, s)).collect();
     let root = lib.library_folder()?.map(|f| std::path::PathBuf::from(f.path));
     let mut used: HashSet<String> = index.playlists.values().map(|e| e.file.to_lowercase()).collect();
@@ -191,7 +275,7 @@ pub fn sync(lib: &Library, dav: &WebDav, folder: &str) -> Result<PlaylistSync> {
                 Some(f) if index.playlists[&uuid].name == l.name => f.clone(),
                 _ => file_name(&l.name, &uuid, used),
             };
-            dav.put_bytes(&at(&file), render(lib, &l.name, &l.songs, &by_id, root.as_deref()).into_bytes())?;
+            dav.put_bytes(&at(&file), render(lib, &l.name, &l.songs, &lib.pending(l.id)?, &by_id, root.as_deref()).into_bytes())?;
             if let Some(f) = old.filter(|f| *f != file) {
                 dav.delete(&at(&f))?;
                 used.remove(&f.to_lowercase());
@@ -212,15 +296,16 @@ pub fn sync(lib: &Library, dav: &WebDav, folder: &str) -> Result<PlaylistSync> {
             (local, Some(e)) if local.is_none_or(|l| e.updated > l.updated) || tomb_here.is_some() => {
                 let Some(bytes) = dav.get_bytes(&at(&e.file))? else { continue };
                 let parsed = parse_m3u(&String::from_utf8_lossy(&bytes), &e.name);
-                let mut ids = Vec::new();
-                for entry in &parsed.entries {
-                    if let Some(id) = best_match(entry, &own).or_else(|| best_match(entry, &apple)) {
-                        if !ids.contains(&id) {
-                            ids.push(id);
-                        }
+                let mut ids: Vec<i64> = Vec::new();
+                let mut pending = Vec::new();
+                for entry in parsed.entries {
+                    match best_match(&entry, &own).or_else(|| best_match(&entry, &apple)) {
+                        Some(id) if !ids.contains(&id) => ids.push(id),
+                        Some(_) => {}
+                        None => pending.push(Pending { after: ids.last().copied(), entry }),
                     }
                 }
-                lib.apply_playlist(&uuid, &e.name, e.updated, &ids)?;
+                lib.apply_playlist(&uuid, &e.name, e.updated, &ids, &pending)?;
                 r.received += 1;
             }
             _ => {}
@@ -265,6 +350,25 @@ mod tests {
         assert_eq!(sync(&b, &db, "Music").unwrap().sent, 1);
         assert_eq!(sync(&a, &da, "Music").unwrap().received, 1);
         assert_eq!(a.playlists().unwrap()[0].name, "Night Drive II");
+
+        // B lacks a song: B's edit must not shorten the playlist on A, and the song finds its place once B has it
+        let a3 = song(&a, "Only on A");
+        let pa = a.playlists().unwrap()[0].clone();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        a.set_playlist_songs(pa.id, &[a2, a3, a1]).unwrap();
+        sync(&a, &da, "Music").unwrap();
+        sync(&b, &db, "Music").unwrap();
+        let pb = b.playlists().unwrap()[0].clone();
+        assert_eq!((pb.songs.clone(), pb.missing), (vec![b2, b1], 1));
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        b.rename_playlist(pb.id, "Night Drive III").unwrap();
+        sync(&b, &db, "Music").unwrap();
+        sync(&a, &da, "Music").unwrap();
+        assert_eq!(a.playlists().unwrap()[0].songs, vec![a2, a3, a1], "the song B doesn't have kept its place");
+        let b3 = song(&b, "Only on A");
+        sync(&b, &db, "Music").unwrap();
+        let pb = b.playlists().unwrap()[0].clone();
+        assert_eq!((pb.songs.clone(), pb.missing), (vec![b2, b3, b1], 0));
 
         // deleted on A, disappears from B and stays gone
         a.delete_playlist(p.id).unwrap();
