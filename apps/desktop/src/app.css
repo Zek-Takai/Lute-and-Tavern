@@ -201,3 +201,19 @@ body.faded .player{cursor:default}
 .drop-on{outline:2px solid var(--accent);outline-offset:2px;border-radius:10px}
 .card.drop-on{outline-offset:-2px}
 body.song-drag #side [data-view^="pl:"],body.song-drag #plNew{outline:1px dashed var(--line);outline-offset:1px}
+
+/* Minimal bar: see-through while you watch, solid while you use it. At rest the icons and text carry a
+   soft shadow so they read over any visualizer; hovering (or tabbing into) the bar fades in a dark glass
+   panel and gives every button a visible face. */
+body .player[data-skin="minimal"]{transition:background-color .25s ease,backdrop-filter .25s ease,-webkit-backdrop-filter .25s ease,box-shadow .25s ease}
+.player[data-skin="minimal"] .play,.player[data-skin="minimal"] .t,.player[data-skin="minimal"] .time{transition:background-color .25s ease,border-color .25s ease,color .25s ease,opacity .25s ease}
+.player[data-skin="minimal"] .play svg{filter:drop-shadow(0 1px 3px rgba(11,13,36,.95)) drop-shadow(0 0 8px rgba(11,13,36,.6))}
+.player[data-skin="minimal"] .muted{text-shadow:0 1px 6px rgba(11,13,36,.95)}
+body .player[data-skin="minimal"]:hover,body .player[data-skin="minimal"]:focus-within{background:rgba(11,13,36,.78);-webkit-backdrop-filter:blur(16px) saturate(1.3);backdrop-filter:blur(16px) saturate(1.3);box-shadow:0 -8px 30px rgba(0,0,0,.35)}
+.player[data-skin="minimal"]:hover .play,.player[data-skin="minimal"]:focus-within .play{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);color:var(--ink)}
+.player[data-skin="minimal"]:hover .play.big,.player[data-skin="minimal"]:focus-within .play.big{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.player[data-skin="minimal"]:hover .play:hover{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+.player[data-skin="minimal"]:hover .tog[aria-pressed="true"],.player[data-skin="minimal"]:hover .tog[aria-expanded="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.player[data-skin="minimal"]:hover .play svg{filter:none}
+.player[data-skin="minimal"]:hover .scrub .track{height:4px}
+@media (prefers-reduced-motion:reduce){body .player[data-skin="minimal"],.player[data-skin="minimal"] .play{transition:none}}
