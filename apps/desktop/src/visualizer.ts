@@ -1,7 +1,9 @@
-// Background visualizer: three layers of glowing silk and drifting motes over a sheet of water. Chosen design,
-// see docs/DESIGN.md. The music drops into the water and the ripples do the rest (audiofeatures.ts listens):
-//   kick drum   a big drop near the center          snare    a drop somewhere else on the surface
-//   hi-hats     small droplets                      voice    a steady source sending out rings while it sings
+// Background visualizer: three layers of glowing silk and drifting motes over water. Chosen design, see
+// docs/DESIGN.md. The music drops into the water and the ripples do the rest (audiofeatures.ts listens).
+// Each kind of sound has its own water and its own fixed color, so a hit lights only its color as it spreads:
+//   low  (ember)   kick drum: a big drop near the center; bass keeps a slow pulse there
+//   high (frost)   snare: a drop somewhere on the surface; hi-hats: small droplets
+//   voice (gold → rose by pitch)   a drifting source sending out rings while it sings
 // Each drop starts a new wave that spreads, passes through the others, and fades as it fans out; nothing makes
 // the whole picture jump. Quiet sections settle the water; loud ones keep it busy. Slow base swells keep the
 // silk alive between songs.
@@ -72,9 +74,9 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
   const scene = new THREE.Scene();
   const cam = new THREE.PerspectiveCamera(55, 1, 0.1, 200);
 
-  const water = new Water();
-  const waveData = new Float32Array(GW * GH);
-  const waveTex = new THREE.DataTexture(waveData, GW, GH, THREE.RedFormat, THREE.FloatType);
+  const low = new Water(), high = new Water(), voiceW = new Water();
+  const waveData = new Float32Array(GW * GH * 4);
+  const waveTex = new THREE.DataTexture(waveData, GW, GH, THREE.RGBAFormat, THREE.FloatType);
   waveTex.minFilter = waveTex.magFilter = THREE.NearestFilter;
   waveTex.needsUpdate = true;
 
@@ -108,17 +110,20 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
           vec3 p=position;float t=uTime,ph=aLayer*2.1;
           // slow base swells (the same whether music plays or not)
           float h=(sin(p.x*.16+t*.35+ph)*1.6+sin(p.z*.23-t*.28+ph*.7)*1.1+sin((p.x-p.z)*.09+t*.2)*1.8)*(.35+uIntensity*.35);
-          // the water: every layer rides the same ripples, the upper ones a little softer
+          // the water: low, high and voice ripples; every layer rides them, the upper ones a little softer
           vec2 uv=vec2((p.x+40.)/80.,(p.z+25.)/50.);
-          float w=texture2D(uWave,uv).r;
+          vec3 wv=texture2D(uWave,uv).rgb;
+          float w=wv.r+wv.g+wv.b;
           h+=w*(3.4-abs(aLayer-1.)*.8);
           p.y=h+(aLayer-1.)*3.4-2.;
           vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;
-          float sing=uVocal*exp(-p.z*p.z*.01);
-          vec3 c=mix(pal(p.x*.012+aLayer*.17+t*.018+h*.05),pal(uPitch*.75+.05),clamp(sing*.5,0.,.6));
-          vCol=c*(.28+.65*smoothstep(-3.,3.,h)+uIntensity*.4+min(abs(w)*1.6,1.2));
+          // calm colors drift on their own; each sound adds only its own color where its ripples are
+          vec3 calmC=pal(p.x*.012+aLayer*.17+t*.018)*(.22+.5*smoothstep(-3.,3.,h)+uIntensity*.3);
+          vec3 ember=vec3(1.,.42,.16),frost=vec3(.55,.9,1.),voiceC=mix(vec3(1.,.78,.3),vec3(1.,.38,.62),uPitch);
+          vec3 lit=ember*min(abs(wv.r)*2.2,1.6)+frost*min(abs(wv.g)*2.6,1.6)+voiceC*min(abs(wv.b)*3.,1.6);
+          vCol=calmC+lit;
           vA=smoothstep(40.,24.,abs(position.x))*smoothstep(25.,12.,abs(position.z))*(.45+uIntensity*.45)*(aLayer==1.?1.:.65);
-          gl_PointSize=clamp((1.3+max(h,0.)*.3+min(abs(w)*1.8,2.))*(260./-mv.z)*uPR,1.,14.);
+          gl_PointSize=clamp((1.3+max(h,0.)*.3+min((abs(wv.r)+abs(wv.g)+abs(wv.b))*1.8,2.))*(260./-mv.z)*uPR,1.,14.);
         }`,
         fragmentShader: `varying vec3 vCol;varying float vA;void main(){float d=length(gl_PointCoord-.5);gl_FragColor=vec4(vCol,smoothstep(.5,.05,d)*vA);}`,
       }),
@@ -146,7 +151,7 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
           float tw=.5+.5*sin(uTime*(1.+aSeed*2.)+aSeed*40.);
           float spark=step(.88,fract(aSeed*91.7+uTime*.05))*uHat;
           vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;
-          vCol=mix(pal(aSeed*.6+uTime*.02+.3),pal(uPitch*.75+.05),uVocal*.3)*(.6+tw*.8+spark);
+          vCol=pal(aSeed*.6+uTime*.02+.3)*(.6+tw*.8)+vec3(.55,.9,1.)*spark*1.4;
           vA=(.2+tw*.4+spark*.35)*(.55+uIntensity*.4);
           gl_PointSize=clamp((1.+aSeed*2.2+spark*2.)*(200./-mv.z)*uPR,1.,10.);
         }`,
@@ -191,9 +196,9 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
       prevHit[k] = f[k];
       return r;
     };
-    if (rose('kick')) water.drop(rnd(6), rnd(4), 5.5, -(1.7 + f.bass * 1.8) * soft);
-    if (rose('snare')) water.drop(rnd(24), rnd(13), 3.2, -1.4 * soft);
-    if (rose('hat')) water.drop(rnd(34), rnd(20), 1.8, -0.45 * soft);
+    if (rose('kick')) low.drop(rnd(6), rnd(4), 5.5, -(1.7 + f.bass * 1.8) * soft);
+    if (rose('snare')) high.drop(rnd(24), rnd(13), 3.2, -1.4 * soft);
+    if (rose('hat')) high.drop(rnd(34), rnd(20), 1.8, -0.45 * soft);
 
     // the voice: a source drifting slowly along the middle, sending rings while it sings (higher = tighter)
     vocal += (f.vocal - vocal) * Math.min(1, dt * 3);
@@ -205,11 +210,19 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
     while (stepClock >= 1 && n < 4) {
       stepClock -= 1;
       n++;
-      if (vocal > 0.15) water.drop(voiceX, 0, 2.4, Math.sin(voicePhase) * vocal * 0.06 * soft);
-      water.step();
+      if (vocal > 0.15) voiceW.drop(voiceX, 0, 2.4, Math.sin(voicePhase) * vocal * 0.06 * soft);
+      // the bass: a slow pulse at the center while it plays
+      if (f.bass > 0.2) low.drop(0, 0, 6, Math.sin(voicePhase * 0.25) * f.bass * 0.025 * soft);
+      low.step();
+      high.step();
+      voiceW.step();
     }
     if (n === 4) stepClock = 0; // a long pause (window hidden): don't race to catch up
-    waveData.set(water.cur);
+    for (let i = 0, a = low.cur, b = high.cur, c = voiceW.cur; i < a.length; i++) {
+      waveData[i * 4] = a[i];
+      waveData[i * 4 + 1] = b[i];
+      waveData[i * 4 + 2] = c[i];
+    }
     waveTex.needsUpdate = true;
 
     // slow things: the section's loudness eases in over seconds
