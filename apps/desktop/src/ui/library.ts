@@ -269,6 +269,7 @@ export function initLibrary(actions: { addFolder: () => void; request: () => voi
     rerender();
   };
   $<HTMLInputElement>('#q').oninput = (e) => {
+    if ($<HTMLSelectElement>('#qSource').value !== 'library') return; // other services search in ui/search.ts
     state.query = (e.target as HTMLInputElement).value;
     renderHead();
     renderGrid();

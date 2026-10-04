@@ -14,8 +14,12 @@
       <img class="logo" src="/src/assets/icon.svg" alt="">
       <h1>Lute &amp; Tavern</h1>
     </div>
-    <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input id="q" type="search" placeholder="Search songs, artists, albums, lyrics" aria-label="Search music"></label>
+    <div class="search">
+      <select id="qSource" aria-label="Where to search"><option value="library">My music</option><option value="apple">Apple Music</option></select>
+      <label class="search-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" type="search" placeholder="Search songs, artists, albums, lyrics" aria-label="Search music" autocomplete="off" aria-controls="qDrop"></label>
+      <div class="qdrop glass" id="qDrop" hidden role="listbox" aria-label="Search results"></div>
+    </div>
     <button class="btn" id="addMusic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 4v12M6 10l6 6 6-6M5 20h14"/></svg>Add music</button>
     <button class="btn" id="assistBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/></svg>Assistant</button>
     <button class="btn primary" id="newSong"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>Request a song</button>

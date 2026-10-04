@@ -70,6 +70,35 @@ export async function handleApplePanelClick(t: HTMLElement, openSettings: () => 
   return true;
 }
 
+/** Opens the Apple Music page on a search (from the main search bar). */
+export function showAppleSearch(q: string) {
+  term = q;
+  sec = 'search';
+  opened = null;
+  page = null;
+  state.view = { kind: 'apple' };
+  state.sideTab = 'apple';
+  rerender();
+}
+
+/** Opens an Apple Music album, playlist or artist page. */
+export function showAppleItem(it: AppleItem) {
+  opened = it;
+  sec = 'open';
+  page = null;
+  state.view = { kind: 'apple' };
+  state.sideTab = 'apple';
+  rerender();
+}
+
+/** Plays a song, or a whole album, playlist or artist's top songs, without changing the page. */
+export async function playAppleItem(it: AppleItem) {
+  const songs = it.type === 'songs' || it.type === 'library-songs' ? songsOf([it]) : songsOf(await tracksOf(it));
+  const list = songs.map((x) => savedFor(x) ?? x);
+  if (!list.length) return toast('Nothing to play there.');
+  playSong(list[0], list);
+}
+
 export const appleTitle = () =>
   ({ search: 'Apple Music', songs: 'Your songs', playlists: 'Your playlists', recent: 'Recently played', foryou: 'For you', charts: 'Top charts', open: opened?.name ?? 'Apple Music' })[sec];
 
