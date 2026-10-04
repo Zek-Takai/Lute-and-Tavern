@@ -46,7 +46,7 @@ impl DataDirs {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Song {
     pub id: i64,
