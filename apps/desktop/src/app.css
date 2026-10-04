@@ -174,3 +174,14 @@ nav.rail { position: sticky; top: 16px; display: flex; flex-direction: column; a
 
 /* a song whose file can't be found right now */
 .card.missing{opacity:.45;filter:grayscale(1)}
+
+/* Visualizer view: the library fades out slowly when idle and returns quickly, like an invisibility spell
+   wearing off (the blur clears as it appears). The player bar always stays. */
+.wrap,.queue,.veil{transition:opacity .35s ease-out,filter .45s ease-out,visibility 0s}
+body.faded .wrap,body.faded .queue{opacity:0;filter:blur(8px);visibility:hidden;pointer-events:none;transition:opacity 1.6s ease-in,filter 1.6s ease-in,visibility 0s 1.6s}
+body.faded .veil{opacity:0;transition:opacity 1.6s ease-in}
+body.faded{cursor:none}
+body.faded .player{cursor:default}
+@media (prefers-reduced-motion:reduce){
+  .wrap,.queue,.veil,body.faded .wrap,body.faded .queue,body.faded .veil{transition:opacity .2s linear,visibility 0s;filter:none}
+}

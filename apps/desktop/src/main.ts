@@ -21,6 +21,7 @@ import { initSources } from './ui/sources';
 import { addMusicFolder, addSongsToLibrary, checkForUpdatesAtStart, chooseLibrary, openSettings } from './ui/settings';
 import { initSheetKeys } from './ui/sheet';
 import { initApple, startApplePulls } from './ui/apple';
+import { initFade } from './ui/fade';
 import { onAppleChange } from './apple';
 import { initSecureStorage } from './secureStorage';
 import { activeTab, cur, initSong, refreshSong } from './ui/song';
@@ -168,6 +169,7 @@ async function boot() {
   $('#rMode').onclick = () => cycleRepeat();
   renderAll();
   restoreNowPlaying();
+  initFade();
   startVisualizer($<HTMLCanvasElement>('#viz'));
   await initEvents();
   await initDragDrop();
