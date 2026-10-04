@@ -20,6 +20,7 @@ pub mod remote_library;
 pub mod remote_plex;
 pub mod remote_subsonic;
 pub mod remote_webdav;
+pub mod songid;
 pub mod songwriter;
 pub mod sync;
 pub mod tags;

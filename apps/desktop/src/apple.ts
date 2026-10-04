@@ -146,6 +146,7 @@ export function toSong(it: AppleItem, saved?: Song): Song {
     track: a.trackNumber ?? null, duration: a.durationInMillis ? a.durationInMillis / 1000 : null,
     hasAudio: false, hasFile: false, stems: 0, songDir: null, art: null, addedAt: 0, updatedAt: 0,
     request: null, status: null, subGenre: '', key: '', bpm: 0, style: '', exclude: '', lyrics: '', masterTake: null, notes: [], chords: [],
+    uid: null,
   };
 }
 export const songsOf = (items: AppleItem[]) => items.filter(isSong).map((it) => toSong(it));

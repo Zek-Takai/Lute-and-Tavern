@@ -40,6 +40,8 @@ export interface Song {
   /** Where it plays from: 'local' (a file) or a service such as 'apple'. */
   provider: string;
   providerId: string | null;
+  /** The song's permanent ID (null for a server song not processed yet). */
+  uid: string | null;
   /** Artwork URL template from the service ({w}x{h}). */
   artUrl: string | null;
 }

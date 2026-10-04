@@ -603,7 +603,7 @@ impl Library {
             .collect::<rusqlite::Result<Vec<_>>>()?
         };
         let doc = json!({
-            "app": "Lute & Tavern", "format": 1,
+            "app": "Lute & Tavern", "format": 1, "uid": s.uid,
             "title": s.title, "artist": s.artist, "album": s.album, "year": s.year, "genre": s.genre,
             "source": s.source, "request": s.request, "status": s.status,
             "subGenre": s.sub_genre, "key": s.key, "bpm": s.bpm,

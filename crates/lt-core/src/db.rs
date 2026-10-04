@@ -213,6 +213,11 @@ const MIGRATIONS: &[&str] = &[
         entry       TEXT NOT NULL
     );
     "#,
+    // v14: every song's permanent ID (see songid.rs), the same on every device
+    r#"
+    ALTER TABLE songs ADD COLUMN uid TEXT;
+    CREATE INDEX songs_uid ON songs(uid);
+    "#,
 ];
 
 pub fn open(path: &std::path::Path) -> Result<Connection> {

@@ -93,6 +93,8 @@ pub struct Song {
     pub art_url: Option<String>,
     /// Its file can't be found right now (moved away, or the drive is offline); it comes back with the file.
     pub missing: bool,
+    /// The song's permanent ID (songid.rs). None for a server song not yet processed.
+    pub uid: Option<String>,
 }
 
 /// A song from a streaming service, as the interface sends it when saving it to the library.
@@ -120,7 +122,7 @@ const SONG_COLS: &str = "s.id, s.source, s.title, s.artist, s.album, s.year, s.g
     s.master_take, s.notes_json, s.chords_json, \
     (s.path IS NOT NULL OR EXISTS (SELECT 1 FROM takes t WHERE t.song_id = s.id)), (SELECT COUNT(*) FROM stems st WHERE st.song_id = s.id), \
     (SELECT s.song_dir FROM folders f WHERE f.id = s.folder_id AND f.managed = 1), s.provider, s.provider_id, s.art_url, \
-    s.missing_since IS NOT NULL";
+    s.missing_since IS NOT NULL, s.uid";
 
 fn song_from_row(r: &Row) -> rusqlite::Result<Song> {
     let notes: String = r.get(22)?;
@@ -157,6 +159,7 @@ fn song_from_row(r: &Row) -> rusqlite::Result<Song> {
         provider_id: r.get(28)?,
         art_url: r.get(29)?,
         missing: r.get(30)?,
+        uid: r.get(31)?,
     })
 }
 
@@ -457,6 +460,42 @@ impl Library {
         self.song(id)
     }
 
+    /// Gives every song that has none its permanent ID (songid.rs): from its audio, from its song.json (made
+    /// on another device), from its service's catalog number, or new and random. Server songs get theirs when
+    /// the server's library is processed. An exact copy of audio already in the library still gets its own ID.
+    /// Returns how many songs got one.
+    pub fn ensure_uids(&self) -> Result<usize> {
+        let rows: Vec<(i64, String, Option<String>, Option<String>, Option<String>)> = {
+            let db = self.db();
+            let mut st = db.prepare("SELECT id, provider, provider_id, path, song_dir FROM songs WHERE uid IS NULL AND provider <> 'remote'")?;
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?.collect::<rusqlite::Result<_>>()?
+        };
+        let mut n = 0;
+        for (id, provider, pid, path, dir) in rows {
+            let from_sidecar = dir.as_ref().and_then(|d| std::fs::read_to_string(Path::new(d).join(crate::organize::SIDECAR)).ok())
+                .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+                .and_then(|v| v["uid"].as_str().filter(|u| u.starts_with("LT-")).map(String::from));
+            let base = match (provider.as_str(), from_sidecar, path) {
+                (_, Some(u), _) => u,
+                ("apple", _, _) => crate::songid::for_service("apple", pid.as_deref().unwrap_or_default()),
+                (_, _, Some(p)) if Path::new(&p).is_file() => crate::songid::for_file(Path::new(&p)).unwrap_or_else(|_| crate::songid::random()),
+                _ => crate::songid::random(),
+            };
+            let mut uid = base.clone();
+            let mut k = 2;
+            while self.db().query_row("SELECT COUNT(*) FROM songs WHERE uid = ?1", [&uid], |r| r.get::<_, i64>(0))? > 0 {
+                uid = crate::songid::variant(&base, k);
+                k += 1;
+            }
+            self.db().execute("UPDATE songs SET uid = ?2 WHERE id = ?1", params![id, uid])?;
+            if dir.is_some() {
+                let _ = self.write_sidecar(id);
+            }
+            n += 1;
+        }
+        Ok(n)
+    }
+
     /// Files a song under the songwriter ("written with …") or back under the person's own music. A song
     /// marked as written takes the songwriter's name as its artist, so it follows later renames.
     pub fn set_song_written(&self, id: i64, written: bool, writer: &str) -> Result<Song> {
@@ -600,6 +639,7 @@ impl Library {
                 |r| r.get(0),
             )?
         };
+        self.ensure_uids()?;
         self.song(id)
     }
 
@@ -734,6 +774,7 @@ impl Library {
             }
         }
         report.removed += self.drop_empty_stem_songs()?;
+        self.ensure_uids()?;
         Ok(report)
     }
 
@@ -846,6 +887,7 @@ impl Library {
                     self.write_cover(id)?;
                     self.write_sidecar(id)?;
                 }
+                self.ensure_uids()?;
                 Ok(Imported::Added {
                     untagged: info.genre == genre::UNSORTED,
                 })
@@ -1879,6 +1921,7 @@ impl Library {
             db.last_insert_rowid()
         };
         self.add_message(id, "user", request)?;
+        self.ensure_uids()?;
         self.song(id)
     }
 
@@ -2167,6 +2210,37 @@ mod tests {
         l.db().execute("UPDATE songs SET missing_since = 1", []).unwrap();
         assert_eq!(l.scan_folder(&f).unwrap().removed, 1);
         assert!(l.songs().unwrap().is_empty());
+    }
+
+    #[test]
+    fn every_song_gets_a_permanent_id() {
+        let (dir, l) = lib();
+        let music = dir.path().join("music");
+        std::fs::create_dir_all(&music).unwrap();
+        std::fs::write(music.join("One.mp3"), b"same audio bytes").unwrap();
+        std::fs::write(music.join("Copy.mp3"), b"same audio bytes").unwrap();
+        let f = l.add_folder(&music).unwrap();
+        l.scan_folder(&f).unwrap();
+        let w = l.create_request("a folk song", None, "Bard").unwrap();
+        let songs = l.songs().unwrap();
+        let ids: Vec<String> = songs.iter().map(|s| s.uid.clone().expect("every song has an ID")).collect();
+        assert_eq!(ids.len(), 3);
+        assert!(ids.iter().all(|u| u.starts_with("LT-") && u.len() == 42), "{ids:?}");
+        let set: std::collections::HashSet<_> = ids.iter().collect();
+        assert_eq!(set.len(), 3, "even an exact copy gets its own ID");
+        // the ID stays when the song is renamed
+        let before = l.song(w.id).unwrap().uid;
+        l.update_song(w.id, &SongPatch { title: Some("Salt and Rope".into()), ..Default::default() }).unwrap();
+        assert_eq!(l.song(w.id).unwrap().uid, before);
+        // the same file on another device gets the same ID
+        let other = Library::open(&dir.path().join("other")).unwrap();
+        let f2 = other.add_folder(&music).unwrap();
+        other.scan_folder(&f2).unwrap();
+        let mut a: Vec<_> = songs.iter().filter(|s| s.source == "library").filter_map(|s| s.uid.clone()).collect();
+        let mut b: Vec<_> = other.songs().unwrap().into_iter().filter_map(|s| s.uid).collect();
+        a.sort();
+        b.sort();
+        assert_eq!(a, b);
     }
 
     #[test]

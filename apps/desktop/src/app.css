@@ -217,3 +217,4 @@ body .player[data-skin="minimal"]:hover,body .player[data-skin="minimal"]:focus-
 .player[data-skin="minimal"]:hover .play svg{filter:none}
 .player[data-skin="minimal"]:hover .scrub .track{height:4px}
 @media (prefers-reduced-motion:reduce){body .player[data-skin="minimal"],.player[data-skin="minimal"] .play{transition:none}}
+code.uid{font-size:12px;letter-spacing:.02em;user-select:all;word-break:break-all}

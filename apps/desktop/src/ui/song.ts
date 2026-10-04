@@ -227,6 +227,7 @@ export function renderTab() {
       ${s.stemFiles.length ? `<dt>Stems</dt><dd>${pickStems(s.stemFiles).length} parts</dd>` : ''}
       ${s.takes.length ? `<dt>Takes</dt><dd>${s.takes.length}</dd>` : ''}
       <dt>Added</dt><dd>${date(s.addedAt)}</dd>
+      <dt>Song ID</dt><dd>${s.uid ? `<code class="uid">${esc(s.uid)}</code> <button class="btn small" id="uidCopy" title="Copy the song ID">Copy</button>` : '<span class="muted">Given once your server\'s library has been processed</span>'}</dd>
       ${s.songDir ? `<dt>Folder</dt><dd class="path-text">${esc(s.songDir)}</dd>` : ''}
     </dl>
     ${s.source !== 'ai' && !s.provider?.startsWith('apple') ? `<div class="row">${STEM_BUTTONS}</div>` : ''}
@@ -252,6 +253,7 @@ export function renderTab() {
       await afterChange();
       toast('Artwork added');
     };
+    b.querySelector<HTMLElement>('#uidCopy')?.addEventListener('click', () => void copyText(s.uid!, 'Song ID'));
     b.querySelector<HTMLElement>('#artClear')?.addEventListener('click', async () => { await api.clearArt(s.id); await afterChange(); });
     b.querySelectorAll<HTMLInputElement>('[data-pl]').forEach((cb) => (cb.onchange = async () => {
       await api.toggleInPlaylist(Number(cb.dataset.pl), s.id, cb.checked).catch((e) => toast(errText(e)));

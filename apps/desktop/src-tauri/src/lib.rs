@@ -515,6 +515,8 @@ pub fn run() {
             tauri::async_runtime::spawn_blocking(move || {
                 let state = handle.state::<AppState>();
                 let mut changed = state.lib.backfill_take_art().unwrap_or(0) > 0;
+                // every song gets its permanent ID (songs from before IDs existed, once)
+                changed |= state.lib.ensure_uids().unwrap_or(0) > 0;
                 for f in state.lib.folders().unwrap_or_default() {
                     if let Ok(r) = state.lib.scan_folder(&f) {
                         changed |= r.added + r.updated + r.removed > 0;

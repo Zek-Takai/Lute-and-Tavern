@@ -148,6 +148,7 @@ impl Library {
             r.playlists_updated += 1;
         }
         self.set_setting("applePlaylistsPulled", &serde_json::to_value(&seen)?)?;
+        self.ensure_uids()?;
 
         // Songs that left the Apple library: gone here too, unless a playlist holds them (then they stay as
         // a saved song). An empty answer is not trusted to mean "they removed everything".
