@@ -4,7 +4,7 @@ import { ask, message, open as pickFolder } from '@tauri-apps/plugin-dialog';
 import { api, errText, type McpInfo, type PlexServer, type SpeechSettings, type SyncSettings, type UpdateInfo, type BackupSettings, type BackupSchedule, type PlaylistSyncLast } from '../api';
 import { comboOf, DEFAULT_KEYS, keyLabel } from './assistant';
 import { connections, loadConnections, syncStatus } from './sources';
-import { applyLineColor, applySkin, LINE_COLORS, SKINS } from '../player';
+import { crossfade, setCrossfade, applyLineColor, applySkin, LINE_COLORS, SKINS } from '../player';
 import { applePullText, runApplePull } from './apple';
 import { appleStatus, connectApple, disconnectApple, forgetAppleKey, isConnected, musicKit, setAppleKey, type AppleStatus } from '../apple';
 import { libraryFolder, reload, rerender, saveSetting, state } from '../state';
@@ -361,6 +361,9 @@ function render() {
     </section>
 
     <section class="set-sec" data-tab="general">
+      <label class="row small" for="xfade">Between songs
+        <select id="xfade" class="btn small">${[0, 2, 4, 6, 8, 10].map((n) => `<option value="${n}" ${crossfade === n ? 'selected' : ''}>${n ? `Crossfade over ${n} seconds` : 'No gap, no crossfade'}</option>`).join('')}</select></label>
+      <p class="muted small">The next song is always loaded ahead of time, so there's no pause between songs. A crossfade also blends the end of one song into the start of the next.</p>
       <fieldset class="choice" id="setSkin">
         <legend>Player bar</legend>
         ${SKINS.map(([k, l, d]) => `<label><input type="radio" name="playerSkin" value="${k}" ${((state.settings.playerSkin as string) || 'classic') === k ? 'checked' : ''}> <span><b>${l}</b><br><span class="muted small">${d}</span></span></label>`).join('')}
@@ -377,6 +380,7 @@ function render() {
     </section>`;
 
   $('#setClose').onclick = () => $<HTMLDialogElement>('#set').close();
+  $<HTMLSelectElement>('#xfade').onchange = (e) => setCrossfade(Number((e.target as HTMLSelectElement).value));
   showTab(tab);
   const tabs = $('#setBody .set-tabs');
   tabs.onclick = (e) => {

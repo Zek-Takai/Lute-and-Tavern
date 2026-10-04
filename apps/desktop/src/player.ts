@@ -9,7 +9,157 @@ import { $, cssUrl, esc, hueOf, PAUSE, PLAY, toast } from './util';
 let ac: AudioContext | null = null;
 let master: GainNode | null = null;
 export let analyser: AnalyserNode | null = null;
+/** The sound graph, for the visualizer's own listening (null until something has played). */
+export const audioGraph = () => (ac && master ? { ac, master } : null);
+/** When stems play: each part's sound, by name, so the visualizer hears vocals, drums and bass apart. */
+export const stemTaps = (): { name: string; node: AudioNode }[] =>
+  playing?.kind === 'stems' ? playing.tracks.map((t) => ({ name: t.name, node: t.gain })) : [];
 let media: HTMLAudioElement | null = null;
+
+// ---------- gapless: two decks ----------
+// Files and server songs play on one of two audio "decks". About 20 seconds before a song ends, the next
+// song in the list is loaded on the other deck (its stream address resolved, the server connection made,
+// the first part buffered), so the hand-off at the end is instant, or a crossfade if the person wants one.
+type Deck = { el: HTMLAudioElement; gain: GainNode };
+let decks: Deck[] = [];
+let standby: { deck: Deck; song: Song; url: string; sub: string; ready: boolean; fading: boolean } | null = null;
+let preparing: Song | null = null;
+const PRELOAD_SECS = 20;
+/** Seconds of crossfade between songs (0 = straight hand-off), from Settings. */
+export let crossfade = 0;
+export function setCrossfade(secs: number) {
+  crossfade = Math.max(0, Math.min(12, secs));
+  void saveSetting('crossfade', crossfade);
+}
+
+function deckFor(el: HTMLAudioElement | null) {
+  return decks.find((d) => d.el === el);
+}
+
+function ensureDecks() {
+  if (decks.length) return;
+  decks = [0, 1].map(() => {
+    const el = new Audio();
+    el.crossOrigin = 'anonymous';
+    el.preload = 'auto';
+    const gain = ac!.createGain();
+    ac!.createMediaElementSource(el).connect(gain).connect(master!);
+    el.onended = () => { if (el === media) onEnded(); };
+    el.onerror = () => {
+      if (el !== media) {
+        // the standby deck failed to load: forget it, the normal start takes over at the end
+        if (standby?.deck.el === el) standby = null;
+        return;
+      }
+      const e = el.error;
+      void api.logEvent('error', `audio element failed: code=${e?.code} message=${e?.message ?? ''} src=${el.currentSrc}`);
+    };
+    return { el, gain };
+  });
+}
+
+function clearStandby() {
+  if (standby) {
+    standby.deck.el.pause();
+    standby.deck.el.removeAttribute('src');
+    standby.deck.el.load();
+    standby.deck.gain.gain.cancelScheduledValues(0);
+    standby.deck.gain.gain.value = 1;
+  }
+  standby = null;
+  preparing = null;
+}
+
+/** The song that plays after this one, the way onEnded would pick it. */
+function upcoming(): Song | null {
+  if (repeat === 'one') return nowSong;
+  if (!queue.length || qi < 0) return null;
+  if (qi + 1 < queue.length) return queue[qi + 1];
+  return repeat === 'all' ? queue[0] : null;
+}
+
+/** Whether a song can go on a deck (a whole file or a server stream; not radio, Apple, stems or melodies). */
+function deckable(s: Song) {
+  if (s.missing) return false;
+  if (s.provider === 'radio' || s.provider === 'apple') return false;
+  if (streamSources[s.provider]) return true;
+  return s.hasFile;
+}
+
+async function prepareNext(next: Song) {
+  if (!media || preparing === next) return;
+  preparing = next;
+  const gen = playGen;
+  let url: string;
+  try {
+    url = streamSources[next.provider] ? await streamSources[next.provider](next) : lt('audio', next.id);
+  } catch {
+    preparing = null;
+    return;
+  }
+  if (gen !== playGen || preparing !== next) return;
+  const deck = decks.find((d) => d.el !== media)!;
+  deck.gain.gain.cancelScheduledValues(0);
+  deck.gain.gain.value = crossfade > 0 ? 0 : 1;
+  deck.el.src = url;
+  deck.el.load();
+  const sub = streamSources[next.provider] ? next.artist || next.album : [next.artist, next.album].filter(Boolean).join(', ');
+  standby = { deck, song: next, url, sub, ready: false, fading: false };
+  deck.el.addEventListener('canplaythrough', () => { if (standby?.deck === deck) standby.ready = true; }, { once: true });
+}
+
+/** Called every frame while a deck plays: load the next song in time, start a crossfade at the right moment. */
+function deckTick() {
+  if (playing?.kind !== 'file' || paused || !media || !decks.length) return;
+  const next = upcoming();
+  if (!next || !deckable(next)) {
+    if (standby) clearStandby();
+    return;
+  }
+  if (standby && standby.song !== next) clearStandby();
+  const left = (Number.isFinite(media.duration) ? media.duration : Infinity) - media.currentTime;
+  if (!standby && left <= PRELOAD_SECS + crossfade) void prepareNext(next);
+  if (standby?.ready && crossfade > 0 && !standby.fading && left <= crossfade) {
+    // both play for a moment: the old one fades out as the new one fades in
+    const t = ac!.currentTime, d = Math.max(0.2, left);
+    const out = deckFor(media)!;
+    out.gain.gain.cancelScheduledValues(t);
+    out.gain.gain.setValueAtTime(out.gain.gain.value, t);
+    out.gain.gain.linearRampToValueAtTime(0, t + d);
+    standby.deck.gain.gain.cancelScheduledValues(t);
+    standby.deck.gain.gain.setValueAtTime(0, t);
+    standby.deck.gain.gain.linearRampToValueAtTime(1, t + d);
+    standby.fading = true;
+    void standby.deck.el.play().catch(() => {});
+    handOff();
+  }
+}
+
+/** Makes the standby deck the playing one: no gap, no stop. */
+function handOff() {
+  const st = standby!;
+  const old = media!;
+  standby = null;
+  preparing = null;
+  if (repeat !== 'one') qi = qi + 1 < queue.length ? qi + 1 : 0;
+  media = st.deck.el;
+  if (!st.fading) {
+    st.deck.gain.gain.value = 1;
+    void media.play().catch(() => {});
+    old.pause();
+  } else {
+    // the old deck finishes its fade, then goes quiet
+    setTimeout(() => { if (old !== media) { old.pause(); const d = deckFor(old); if (d) d.gain.gain.value = 1; } }, (crossfade + 0.5) * 1000);
+  }
+  const s = st.song, id = String(s.id), url = st.url, sub = st.sub;
+  playing = { kind: 'file', id };
+  paused = false;
+  resumeAt = 0;
+  showNow(s, sub);
+  lastPlay = () => playFile(url, s, sub, id, takeResume());
+  saveNowPlaying();
+  syncIcons();
+}
 
 type StemTrack = { name: string; el: HTMLAudioElement; gain: GainNode; src: MediaElementAudioSourceNode };
 type Playing =
@@ -115,6 +265,7 @@ function ensureAudio() {
 
 export function stop() {
   playGen++;
+  clearStandby();
   if (playing) {
     if (playing.kind === 'synth') {
       playing.nodes.forEach((n) => { try { n.stop(); } catch { /* already stopped */ } });
@@ -129,7 +280,11 @@ export function stop() {
         t.gain.disconnect();
         t.el.removeAttribute('src');
       }
-    } else media?.pause();
+    } else {
+      // both decks: one may still be fading out
+      media?.pause();
+      for (const d of decks) d.el.pause();
+    }
     playing = null;
   }
   paused = false;
@@ -277,15 +432,12 @@ function playFile(url: string, s: Song, sub: string, id: string, startAt = 0) {
   stop();
   if (!ensureAudio()) return;
   void ac!.resume();
-  if (!media) {
-    media = new Audio();
-    media.crossOrigin = 'anonymous';
-    ac!.createMediaElementSource(media).connect(master!);
-    media.onended = onEnded;
-    media.onerror = () => {
-      const e = media!.error;
-      void api.logEvent('error', `audio element failed: code=${e?.code} message=${e?.message ?? ''} src=${media!.currentSrc}`);
-    };
+  ensureDecks();
+  media ??= decks[0].el;
+  for (const d of decks) {
+    d.gain.gain.cancelScheduledValues(0);
+    d.gain.gain.value = 1;
+    if (d.el !== media) d.el.pause();
   }
   const gen = playGen;
   media.src = url;
@@ -470,6 +622,7 @@ export function blip(step: number, semis = 0) {
 }
 
 function onEnded() {
+  if (standby && standby.song === upcoming() && standby.deck.el.readyState >= 2) return handOff();
   stop();
   if (repeat === 'one' && lastPlay) return lastPlay();
   if (!queue.length || qi < 0) return;
@@ -482,6 +635,11 @@ function onEnded() {
 
 export function step(dir: 1 | -1) {
   if (!queue.length) return;
+  // the next song is already loaded: switch to it at once
+  if (dir === 1 && repeat !== 'one' && standby && standby.song === upcoming() && standby.deck.el.readyState >= 2) {
+    standby.fading = false;
+    return handOff();
+  }
   let n = qi + dir;
   if (n >= queue.length) {
     if (repeat !== 'all') return toast('End of the list. Turn on Repeat playlist to loop it.');
@@ -562,6 +720,7 @@ export function initPlayer() {
   repeat = setting<Repeat>('repeat', 'off');
   syncRepeat();
   shuffle = setting<boolean>('shuffle', false);
+  crossfade = setting<number>('crossfade', 0);
   syncShuffle();
   $('#sMode').onclick = () => {
     setShuffle(!shuffle);
@@ -605,6 +764,7 @@ export function initPlayer() {
 const spec = new Uint8Array(512);
 function tick() {
   requestAnimationFrame(tick);
+  deckTick();
   if (playing && playing.kind !== 'synth' && !dragging) {
     const { cur, dur } = position();
     paintScrub(cur, dur);

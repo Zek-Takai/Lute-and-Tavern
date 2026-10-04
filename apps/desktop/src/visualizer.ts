@@ -1,7 +1,12 @@
-// Background visualizer: three layers of glowing silk and drifting motes that swell with the music
-// and breathe slowly when nothing plays. Chosen design, see docs/DESIGN.md.
+// Background visualizer: three layers of glowing silk and drifting motes that follow the music and breathe
+// slowly when nothing plays. Chosen design, see docs/DESIGN.md. What drives it (audiofeatures.ts):
+//   kick drum   a ring of light rolls out from the center      snare   the silk flashes brighter
+//   hi-hats     the surface shimmers and motes sparkle          bass    the center swells
+//   voice       a ribbon rises along the middle layer and takes the color of the singer's pitch
+//   section     quiet verses lie low and slow; a big chorus lifts everything, speeds it up, brings the camera in
+//   build-up    the waves grow taller as the music rises
 import * as THREE from 'three';
-import { analyser, playing } from './player';
+import { features, listen } from './audiofeatures';
 
 export function startVisualizer(canvas: HTMLCanvasElement) {
   let renderer: THREE.WebGLRenderer;
@@ -17,7 +22,10 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
   renderer.setClearColor(0x0b0d24, 1);
   const scene = new THREE.Scene();
   const cam = new THREE.PerspectiveCamera(55, 1, 0.1, 200);
-  const U = { uTime: { value: 0 }, uBass: { value: 0 }, uMid: { value: 0 }, uTreble: { value: 0 }, uEnergy: { value: 0 }, uPR: { value: DPR } };
+  const U = {
+    uTime: { value: 0 }, uBass: { value: 0 }, uBody: { value: 0 }, uAir: { value: 0 }, uIntensity: { value: 0.3 }, uRise: { value: 0 },
+    uKickAge: { value: 9 }, uKickAmp: { value: 0 }, uSnare: { value: 0 }, uHat: { value: 0 }, uVocal: { value: 0 }, uPitch: { value: 0.5 }, uPR: { value: DPR },
+  };
   const PAL = 'vec3 pal(float t){return .55+.45*cos(6.2831*(t+vec3(.0,.2,.42)));}';
 
   const NX = 220, NZ = 130, L = 3, N = NX * NZ * L;
@@ -39,18 +47,24 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
       g,
       new THREE.ShaderMaterial({
         uniforms: U, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-        vertexShader: `uniform float uTime,uBass,uMid,uTreble,uEnergy,uPR;attribute float aLayer;varying vec3 vCol;varying float vA;${PAL}
+        vertexShader: `uniform float uTime,uBass,uBody,uAir,uIntensity,uRise,uKickAge,uKickAmp,uSnare,uHat,uVocal,uPitch,uPR;attribute float aLayer;varying vec3 vCol;varying float vA;${PAL}
         void main(){
           vec3 p=position;float t=uTime,ph=aLayer*2.1,r=length(p.xz);
           float h=sin(p.x*.16+t*.35+ph)*1.6+sin(p.z*.23-t*.28+ph*.7)*1.1+sin((p.x-p.z)*.09+t*.2)*1.8;
-          h*=.55+uEnergy*1.2;
-          h+=sin(r*.55-t*2.6)*uBass*3.4*exp(-r*.035);
-          h+=sin(p.x*.9+t*3.1)*sin(p.z*.8-t*2.4)*uTreble*1.1;
+          h*=.35+uIntensity*1.15+uRise*.5+uBody*.25;
+          h+=sin(r*.55-t*2.6)*uBass*2.4*exp(-r*.035);
+          float ring=exp(-pow((r-uKickAge*34.)*.33,2.))*uKickAmp*exp(-uKickAge*2.2);
+          h+=ring*3.;
+          h+=sin(p.x*.9+t*3.1)*sin(p.z*.8-t*2.4)*(uAir*.6+uHat*.9);
+          float voice=aLayer==1.?uVocal*exp(-abs(p.z)*.09)*(1.4+sin(p.x*.14-t*1.1)*1.1):0.;
+          h+=voice*2.2;
           p.y=h+(aLayer-1.)*3.4-2.;
           vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;
-          vCol=pal(p.x*.012+aLayer*.17+t*.018+h*.05+uMid*.35)*(.3+.7*smoothstep(-3.,3.,h)+uEnergy*.7);
-          vA=smoothstep(40.,24.,abs(position.x))*smoothstep(25.,12.,abs(position.z))*(.5+uEnergy*.5)*(aLayer==1.?1.:.65);
-          gl_PointSize=clamp((1.3+max(h,0.)*.35+uTreble*2.4)*(260./-mv.z)*uPR,1.,14.);
+          vec3 base=pal(p.x*.012+aLayer*.17+t*.018+h*.05+uBody*.25);
+          vec3 sing=pal(uPitch*.75+.05);
+          vCol=mix(base,sing,clamp(voice*.55,0.,.8))*(.25+.7*smoothstep(-3.,3.,h)+uIntensity*.55+uSnare*.7+ring*.9);
+          vA=smoothstep(40.,24.,abs(position.x))*smoothstep(25.,12.,abs(position.z))*(.4+uIntensity*.6)*(aLayer==1.?1.:.65);
+          gl_PointSize=clamp((1.3+max(h,0.)*.35+uAir*1.6+uHat*1.4+uSnare*1.2+voice*.8)*(260./-mv.z)*uPR,1.,14.);
         }`,
         fragmentShader: `varying vec3 vCol;varying float vA;void main(){float d=length(gl_PointCoord-.5);gl_FragColor=vec4(vCol,smoothstep(.5,.05,d)*vA);}`,
       }),
@@ -72,13 +86,15 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
       mg,
       new THREE.ShaderMaterial({
         uniforms: U, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-        vertexShader: `uniform float uTime,uBass,uTreble,uEnergy,uPR;attribute float aSeed;varying vec3 vCol;varying float vA;${PAL}
+        vertexShader: `uniform float uTime,uBass,uAir,uHat,uSnare,uIntensity,uVocal,uPitch,uPR;attribute float aSeed;varying vec3 vCol;varying float vA;${PAL}
         void main(){
           vec3 p=position;p.y=mod(p.y+uTime*.35*(.3+aSeed)+6.,22.)-6.;p.x+=sin(uTime*.2+aSeed*30.)*1.5;
           float tw=.5+.5*sin(uTime*(1.+aSeed*2.)+aSeed*40.);
+          float spark=step(.82,fract(aSeed*91.7+uTime*.07))*uHat;
           vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;
-          vCol=pal(aSeed*.6+uTime*.02+.3)*(.6+tw*.8);vA=(.25+tw*.45)*(.7+uBass*.8);
-          gl_PointSize=clamp((1.+aSeed*2.2+uTreble*3.)*(200./-mv.z)*uPR,1.,10.);
+          vCol=mix(pal(aSeed*.6+uTime*.02+.3),pal(uPitch*.75+.05),uVocal*.35)*(.6+tw*.8+spark*1.5);
+          vA=(.2+tw*.4+spark*.5)*(.55+uIntensity*.6+uBass*.4+uSnare*.4);
+          gl_PointSize=clamp((1.+aSeed*2.2+uAir*1.8+spark*3.)*(200./-mv.z)*uPR,1.,10.);
         }`,
         fragmentShader: `varying vec3 vCol;varying float vA;void main(){float d=length(gl_PointCoord-.5);gl_FragColor=vec4(vCol,smoothstep(.5,0.,d)*vA);}`,
       }),
@@ -93,14 +109,7 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
   addEventListener('resize', size);
   size();
 
-  const buf = new Uint8Array(512);
-  const lv = { bass: 0, mid: 0, treble: 0, energy: 0 };
-  const avg = (a: number, b: number) => {
-    let s = 0;
-    for (let i = a; i < b; i++) s += buf[i];
-    return s / ((b - a) * 255);
-  };
-  let t = 0, last = performance.now();
+  let t = 0, last = performance.now(), kickAge = 9, kickAmp = 0, lastKick = 0;
   const frame = (now: number) => {
     requestAnimationFrame(frame);
     if (document.hidden) {
@@ -109,23 +118,33 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
     }
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
-    let tg = { bass: 0, mid: 0, treble: 0 };
-    if (playing && analyser) {
-      analyser.getByteFrequencyData(buf);
-      tg = { bass: Math.min(1, Math.pow(avg(1, 7), 1.5) * 1.6), mid: Math.min(1, avg(7, 50) * 1.5), treble: Math.min(1, avg(50, 220) * 2.6) };
+    listen(dt);
+    const f = features;
+    // a new kick starts a new ring
+    if (f.kick > lastKick + 0.5) {
+      kickAge = 0;
+      kickAmp = 0.5 + f.bass * 0.5;
     }
-    for (const b of ['bass', 'mid', 'treble'] as const) lv[b] += (tg[b] - lv[b]) * (tg[b] > lv[b] ? 0.35 : 0.05);
-    lv.energy += (((lv.bass + lv.mid + lv.treble) / 3) * 1.5 - lv.energy) * 0.08;
-    t += dt * (calm ? 0.25 : 1) * (1 + lv.energy * 1.4);
+    lastKick = f.kick;
+    kickAge += dt;
+    t += dt * (calm ? 0.25 : 1) * (0.55 + f.intensity * 1.1 + f.body * 0.3);
     U.uTime.value = t;
-    U.uBass.value = lv.bass;
-    U.uMid.value = lv.mid;
-    U.uTreble.value = lv.treble;
-    U.uEnergy.value = Math.min(1, lv.energy);
+    U.uBass.value = f.bass;
+    U.uBody.value = f.body;
+    U.uAir.value = f.air;
+    U.uIntensity.value = f.intensity;
+    U.uRise.value = f.rise;
+    U.uKickAge.value = calm ? 9 : kickAge;
+    U.uKickAmp.value = kickAmp;
+    U.uSnare.value = calm ? f.snare * 0.3 : f.snare;
+    U.uHat.value = f.hat;
+    U.uVocal.value = f.vocal;
+    U.uPitch.value = f.pitch;
     const a = calm ? 0.6 : t * 0.035;
-    cam.position.set(Math.sin(a) * 24, 7 + Math.sin(t * 0.11) * 1.6, Math.cos(a) * 24);
+    const dist = 24 - f.intensity * 4;
+    cam.position.set(Math.sin(a) * dist, 7 + Math.sin(t * 0.11) * 1.6 + (calm ? 0 : f.kick * 0.25), Math.cos(a) * dist);
     cam.lookAt(0, -1, 0);
-    cam.fov = 55 - lv.bass * 3;
+    cam.fov = 55 - f.bass * 2 - (calm ? 0 : f.kick * 1.2);
     cam.updateProjectionMatrix();
     renderer.render(scene, cam);
   };
