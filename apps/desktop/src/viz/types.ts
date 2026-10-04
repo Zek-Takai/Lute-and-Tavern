@@ -23,11 +23,21 @@ export interface Scene {
 
 export type MakeScene = (renderer: THREE.WebGLRenderer) => Scene;
 
-/** Instrument colors, the same in every scene: low (kick, bass) ember, high (snare, hats) frost, voice gold → rose. */
+/** Colors: a rainbow that keeps cycling (from a random point each time the app opens), so no color owns a
+ *  song. What a sound does shows in how its color is drawn, not which color it is:
+ *    low  (kick, bass)    deep and rich, a touch warmer, with a wide soft halo
+ *    high (snare, hats)   pale and bright, a touch cooler, with a tight crisp core
+ *    voice                medium and smooth, the hue leaning with the note
+ *  Shaders using these need `uTime` declared before this block. */
+const HUE0 = Math.random().toFixed(3);
 export const GLSL_COLORS = `
-const vec3 EMBER = vec3(1.,.42,.16);
-const vec3 FROST = vec3(.55,.9,1.);
-vec3 voiceColor(float pitch){return mix(vec3(1.,.78,.3),vec3(1.,.38,.62),clamp(pitch,0.,1.));}
+vec3 rainbow(float x){return .55+.45*cos(6.2831*(x+vec3(0.,.33,.67)));}
+float hueAt(float x){return uTime*.021+${HUE0}+x;}
+vec3 satur(vec3 c,float s){float l=dot(c,vec3(.299,.587,.114));return mix(vec3(l),c,s);}
+vec3 temper(vec3 c,float k){return c*vec3(1.+.22*k,1.,1.-.22*k);}
+vec3 lowColor(float x){return temper(satur(rainbow(hueAt(x)),1.2),.35)*1.2;}
+vec3 highColor(float x){return temper(satur(rainbow(hueAt(x)),.4),-.3)*.9+.18;}
+vec3 voiceColor(float x,float pitch){return satur(rainbow(hueAt(x+pitch*.25)),.8);}
 `;
 
 /** Recent hits, newest first, as ages in seconds: each one keeps travelling while new ones start. */

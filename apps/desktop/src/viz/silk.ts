@@ -1,14 +1,15 @@
 // Silk: three layers of glowing silk and drifting motes over water. Chosen design, see
 // docs/DESIGN.md. The music drops into the water and the ripples do the rest (audiofeatures.ts listens).
-// Each kind of sound has its own water and its own fixed color, so a hit lights only its color as it spreads:
-//   low  (ember)   kick drum: a big drop near the center; bass keeps a slow pulse there
-//   high (frost)   snare: a drop somewhere on the surface; hi-hats: small droplets
-//   voice (gold → rose by pitch)   a drifting source sending out rings while it sings
+// Each kind of sound has its own water; colors cycle through the rainbow (types.ts GLSL_COLORS), and the kind
+// of sound shows in how its ripples are drawn:
+//   low   kick drum: a big drop near the center; bass keeps a slow pulse there (deep, warm, soft and wide)
+//   high  snare: a drop somewhere on the surface; hi-hats: small droplets (pale, cool, crisp)
+//   voice a drifting source sending out rings while it sings (smooth, hue leaning with the note)
 // Each drop starts a new wave that spreads, passes through the others, and fades as it fans out; nothing makes
 // the whole picture jump. Quiet sections settle the water; loud ones keep it busy. Slow base swells keep the
 // silk alive between songs.
 import * as THREE from 'three';
-import type { Frame, MakeScene } from './types';
+import { GLSL_COLORS, type Frame, type MakeScene } from './types';
 
 // The water: a grid matching the silk (x −40..40, z −25..25), simulated with the wave equation.
 const GW = 200, GH = 125;
@@ -94,7 +95,7 @@ export const makeSilk: MakeScene = (renderer) => {
       g,
       new THREE.ShaderMaterial({
         uniforms: U, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-        vertexShader: `uniform float uTime,uIntensity,uVocal,uPitch,uPR;uniform sampler2D uWave;attribute float aLayer;varying vec3 vCol;varying float vA;${PAL}
+        vertexShader: `uniform float uTime,uIntensity,uVocal,uPitch,uPR;uniform sampler2D uWave;attribute float aLayer;varying vec3 vCol;varying float vA;${PAL}${GLSL_COLORS}
         void main(){
           vec3 p=position;float t=uTime,ph=aLayer*2.1;
           // slow base swells (the same whether music plays or not)
@@ -108,11 +109,11 @@ export const makeSilk: MakeScene = (renderer) => {
           vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;
           // calm colors drift on their own; each sound adds only its own color where its ripples are
           vec3 calmC=pal(p.x*.012+aLayer*.17+t*.018)*(.22+.5*smoothstep(-3.,3.,h)+uIntensity*.3);
-          vec3 ember=vec3(1.,.42,.16),frost=vec3(.55,.9,1.),voiceC=mix(vec3(1.,.78,.3),vec3(1.,.38,.62),uPitch);
-          vec3 lit=ember*min(abs(wv.r)*2.2,1.6)+frost*min(abs(wv.g)*2.6,1.6)+voiceC*min(abs(wv.b)*3.,1.6);
+          // rainbow ripples: lows deep and warm with a soft spread, highs pale and crisp, the voice smooth
+          vec3 lit=lowColor(p.x*.006+p.z*.004)*min(abs(wv.r)*2.4,1.8)+highColor(.5+p.z*.01-p.x*.004)*min(abs(wv.g)*2.8,1.6)+voiceColor(p.x*.005,uPitch)*min(abs(wv.b)*3.,1.6);
           vCol=calmC+lit;
           vA=smoothstep(40.,24.,abs(position.x))*smoothstep(25.,12.,abs(position.z))*(.45+uIntensity*.45)*(aLayer==1.?1.:.65);
-          gl_PointSize=clamp((1.3+max(h,0.)*.3+min((abs(wv.r)+abs(wv.g)+abs(wv.b))*1.8,2.))*(260./-mv.z)*uPR,1.,14.);
+          gl_PointSize=clamp((1.3+max(h,0.)*.3+min(abs(wv.r)*2.6+abs(wv.g)*.9+abs(wv.b)*1.6,2.6))*(260./-mv.z)*uPR,1.,14.);
         }`,
         fragmentShader: `varying vec3 vCol;varying float vA;void main(){float d=length(gl_PointCoord-.5);gl_FragColor=vec4(vCol,smoothstep(.5,.05,d)*vA);}`,
       }),
@@ -134,13 +135,13 @@ export const makeSilk: MakeScene = (renderer) => {
       mg,
       new THREE.ShaderMaterial({
         uniforms: U, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-        vertexShader: `uniform float uTime,uHat,uIntensity,uVocal,uPitch,uPR;attribute float aSeed;varying vec3 vCol;varying float vA;${PAL}
+        vertexShader: `uniform float uTime,uHat,uIntensity,uVocal,uPitch,uPR;attribute float aSeed;varying vec3 vCol;varying float vA;${PAL}${GLSL_COLORS}
         void main(){
           vec3 p=position;p.y=mod(p.y+uTime*.35*(.3+aSeed)+6.,22.)-6.;p.x+=sin(uTime*.2+aSeed*30.)*1.5;
           float tw=.5+.5*sin(uTime*(1.+aSeed*2.)+aSeed*40.);
           float spark=step(.88,fract(aSeed*91.7+uTime*.05))*uHat;
           vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;
-          vCol=pal(aSeed*.6+uTime*.02+.3)*(.6+tw*.8)+vec3(.55,.9,1.)*spark*1.4;
+          vCol=pal(aSeed*.6+uTime*.02+.3)*(.6+tw*.8)+highColor(aSeed)*spark*1.4;
           vA=(.2+tw*.4+spark*.35)*(.55+uIntensity*.4);
           gl_PointSize=clamp((1.+aSeed*2.2+spark*2.)*(200./-mv.z)*uPR,1.,10.);
         }`,

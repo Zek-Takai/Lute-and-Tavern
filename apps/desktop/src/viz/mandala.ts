@@ -15,16 +15,17 @@ void main(){
   vec3 col=vec3(.02,.02,.06)+vec3(.04,.02,.08)*(1.-r);
   float petal=.32+.1*sin(aa*6.+uTime*.6)+uVoice*.18;
   float pe=smoothstep(petal,petal-.03,r)*smoothstep(.0,.12,aa*r*4.)*(.35+.65*fbm(vec2(aa*4.,r*5.-uTime*.3)));
-  col+=voiceColor(uPitch)*pe*(.15+uVoice*.8);
+  col+=voiceColor(aa*.4+r*.3,uPitch)*pe*(.15+uVoice*.8);
   float inner=.55+.08*cos(aa*12.-uTime*.4);
-  col+=vec3(.45,.35,.95)*smoothstep(.012,0.,abs(r-inner))*(.2+uInt*.5);
+  col+=rainbow(hueAt(.25+a*.16))*smoothstep(.012,0.,abs(r-inner))*(.2+uInt*.5);
   for(int i=0;i<8;i++){
-    float k=r-uKickAge[i]*.45;col+=EMBER*exp(-k*k*900.)*uKickAmp[i]*exp(-uKickAge[i]*.9);
-    float s=r-uSnareAge[i]*.6;col+=FROST*exp(-s*s*3000.)*uSnareAmp[i]*exp(-uSnareAge[i]*1.3)*.8;
+    float fi=float(i);
+    float k=r-uKickAge[i]*.45;col+=lowColor(fi*.13)*(exp(-k*k*900.)+exp(-k*k*90.)*.3)*uKickAmp[i]*exp(-uKickAge[i]*.9);
+    float s=r-uSnareAge[i]*.6;col+=highColor(.5+fi*.11)*(exp(-s*s*5000.)*1.3+exp(-s*s*800.)*.12)*uSnareAmp[i]*exp(-uSnareAge[i]*1.3);
   }
   float lace=smoothstep(.04,0.,abs(r-.9))*(.5+.5*sin(aa*48.+uTime*1.3));
-  col+=FROST*lace*(.08+uHat*.9);
-  col+=EMBER*exp(-r*r*14.)*uLow*.55;
+  col+=highColor(a*.16)*lace*(.08+uHat*.9);
+  col+=lowColor(.7)*(exp(-r*r*14.)+exp(-r*r*3.)*.25)*uLow*.55;
   col*=smoothstep(1.35,.9,r);
   gl_FragColor=vec4(col,1.);
 }`;

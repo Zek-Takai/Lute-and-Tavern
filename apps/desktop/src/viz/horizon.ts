@@ -16,22 +16,22 @@ void main(){
   if(uv.y>0.){
     col=mix(vec3(.12,.04,.18),vec3(.02,.02,.07),smoothstep(0.,.55,uv.y));
     vec2 sp=vUv*vec2(asp,1.)*160.;float h=hash(floor(sp));
-    col+=step(.988,h)*smoothstep(.45,0.,length(fract(sp)-.5))*(.25+uHat*1.2*step(.5,fract(h*7.+uTime*.4)))*FROST;
+    col+=step(.988,h)*smoothstep(.45,0.,length(fract(sp)-.5))*((.25)*vec3(.85,.9,1.)+uHat*1.3*step(.5,fract(h*7.+uTime*.4))*highColor(h));
     vec2 sc=uv-vec2(0.,.14);float sr=.2+uVoice*.04;float d=length(sc);
     float stripes=sc.y<0.?step(.5,fract(sc.y*28.+uTime*.3)):1.;
-    vec3 sun=mix(vec3(1.,.55,.25),voiceColor(uPitch),clamp(uVoice*1.4,0.,1.));
+    vec3 sun=mix(rainbow(hueAt(.1)),voiceColor(.1,uPitch),clamp(uVoice*1.4,0.,1.));
     col+=sun*smoothstep(sr,sr-.006,d)*stripes*(.75+uVoice*.4);
     col+=sun*exp(-d*d*18.)*(.12+uVoice*.25);
     float m=abs(uv.x)/asp*2.;float mh=.03+hist(m)*.16*(.5+.5*noise(vec2(uv.x*6.,1.)));
-    if(uv.y<mh){col=mix(vec3(.05,.02,.1),vec3(.12,.05,.2),uv.y/mh);col+=EMBER*smoothstep(.004,0.,abs(uv.y-mh))*(.25+uLow*.8);}
+    if(uv.y<mh){col=mix(vec3(.05,.02,.1),vec3(.12,.05,.2),uv.y/mh);col+=lowColor(m*.3)*(smoothstep(.004,0.,abs(uv.y-mh))+exp(-(mh-uv.y)*40.)*.25)*(.25+uLow*.8);}
   }else{
     float d=-uv.y;float z=.32/d;float x=uv.x*z;
     vec2 g=vec2(x,z+uTravel);vec2 w=fwidth(g);
     float lines=max(smoothstep(1.-w.x*3.,1.,1.-abs(fract(g.x+.5)-.5)*2.),smoothstep(1.-w.y*3.,1.,1.-abs(fract(g.y+.5)-.5)*2.));
     float fade=exp(-z*.06);
-    col=vec3(.03,.0,.07)+vec3(.65,.25,1.)*lines*fade*(.35+uInt*.4);
-    for(int i=0;i<8;i++){float zw=30.-uKickAge[i]*26.;float k=(z-zw)*.35;col+=EMBER*exp(-k*k*6.)*uKickAmp[i]*fade*(.4+lines*1.2)*step(0.,zw);}
-    col+=EMBER*exp(-d*d*400.)*uLow*.35;
+    col=vec3(.03,.0,.07)+rainbow(hueAt(.3+z*.012+x*.01))*lines*fade*(.35+uInt*.4);
+    for(int i=0;i<8;i++){float zw=30.-uKickAge[i]*26.;float k=(z-zw)*.35;col+=lowColor(float(i)*.13)*(exp(-k*k*6.)*(.4+lines*1.2)+exp(-k*k*.8)*.25)*uKickAmp[i]*fade*step(0.,zw);}
+    col+=lowColor(.6)*exp(-d*d*400.)*uLow*.35;
   }
   gl_FragColor=vec4(col,1.);
 }`;

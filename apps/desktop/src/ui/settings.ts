@@ -355,7 +355,7 @@ function render() {
 
     <section class="set-sec" data-tab="visual">
       <h3>Visualizer</h3>
-      <p class="muted small">The moving picture behind the app. Each kind of sound keeps its own color in every one: kick drum and bass ember, snare and hi-hats frost, the voice gold to rose depending on the note.</p>
+      <p class="muted small">The moving picture behind the app. The colors cycle through the rainbow on their own, so no color takes over a song. Sounds show in how the light behaves: kick drum and bass glow deep and wide, snare and hi-hats bright and crisp, the voice smooth.</p>
       <fieldset class="choice" id="setViz">
         <legend>Show</legend>
         ${VISUALIZERS.map((v) => `<label><input type="radio" name="viz" value="${v.id}" ${vizChoice === v.id ? 'checked' : ''}> <span><b>${esc(v.name)}</b><br><span class="muted small">${esc(v.about)}</span></span></label>`).join('')}
