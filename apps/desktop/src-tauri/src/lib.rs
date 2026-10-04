@@ -436,6 +436,8 @@ pub fn run() {
                 }
             }
             let handle = app.handle().clone();
+            // Servers with "In My music" on: refresh their songs in the background.
+            sources::sync_all(app.handle());
             // Catch up on anything that changed while the app was closed, then start watching.
             tauri::async_runtime::spawn_blocking(move || {
                 let state = handle.state::<AppState>();
@@ -517,6 +519,8 @@ pub fn run() {
             sources::plex_login_start,
             sources::plex_login_check,
             sources::plex_connect,
+            sources::remote_library_sync,
+            sources::connection_set_in_library,
             sync::sync_settings,
             sync::set_sync_settings,
             sync::sync_status,

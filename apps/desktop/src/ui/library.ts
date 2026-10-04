@@ -7,7 +7,7 @@ import { $, esc, hueOf, PLAY, toast } from '../util';
 import { artUrl } from '../apple';
 import { appleHead, applePanel, handleApplePanelClick, openApplePage, renderAppleGrid } from './apple';
 import { openSong } from './song';
-import { handleSourcePanelClick, openRadio, openServers, radioHead, radioPanel, remoteHead, renderRadioGrid, renderRemoteGrid, serversPanel } from './sources';
+import { connections, handleSourcePanelClick, openRadio, openServers, radioHead, radioPanel, remoteHead, renderRadioGrid, renderRemoteGrid, serversPanel } from './sources';
 
 /** Stages of a written song, for filters; songs with audio are just songs, so only the first two get a label on cards. */
 export const STATUS: Record<string, [string, string]> = {
@@ -54,7 +54,7 @@ export function renderSide() {
   tg.title = tg.ariaLabel = panelOpen ? 'Hide the list' : 'Show the list';
   $('#side').hidden = !panelOpen;
   if (!panelOpen) return;
-  const n = (k: string) => state.songs.filter((s) => (k === 'all' ? inMainLibrary(s) : k === 'library' ? s.source === 'library' && s.provider === 'local' : s.source === k)).length;
+  const n = (k: string) => state.songs.filter((s) => (k === 'all' ? inMainLibrary(s) : k === 'library' ? s.source === 'library' && (s.provider === 'local' || s.provider === 'remote') : s.source === k)).length;
   const v = state.view;
   let rows = '';
   if (state.sideTab === 'library')
@@ -140,6 +140,10 @@ export function renderChips() {
 /** Where a song comes from, shown on every card. */
 export function sourceBadge(s: Song) {
   if (s.provider === 'apple') return '<span class="src src-apple" title="Streams from Apple Music">Apple Music</span>';
+  if (s.provider === 'remote') {
+    const c = connections.find((x) => String(x.id) === (s.providerId ?? '').split(':')[0]);
+    return `<span class="src src-remote" title="Streams from ${esc(c?.name ?? 'your server')}">${esc(c?.name ?? 'Server')}</span>`;
+  }
   if (s.source === 'ai') return `<span class="src src-ai" title="Written with ${esc(writerName())}">${esc(writerName())}</span>`;
   return '<span class="src src-mine" title="A file in your library">Your music</span>';
 }

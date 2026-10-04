@@ -239,6 +239,10 @@ impl MusicServer for WebDav<'_> {
         Ok(self.open(kind, id)?.into_iter().filter(|i| i.kind == "song").collect())
     }
 
+    fn all_songs(&self) -> Result<Vec<RemoteItem>> {
+        Ok(self.index()?.into_iter().filter(|i| i.kind == "song").collect())
+    }
+
     fn stream(&self, song_id: &str) -> Result<Target> {
         Ok(Target { url: self.url_of(song_id)?.to_string(), headers: self.headers() })
     }

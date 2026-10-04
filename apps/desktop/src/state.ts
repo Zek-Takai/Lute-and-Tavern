@@ -90,7 +90,7 @@ function inView(s: Song) {
   const v = state.view;
   if (v.kind === 'apple' || v.kind === 'radio' || v.kind === 'remote') return false;
   if (v.kind === 'ai') return s.source === 'ai';
-  if (v.kind === 'library') return s.source === 'library' && s.provider === 'local';
+  if (v.kind === 'library') return s.source === 'library' && (s.provider === 'local' || s.provider === 'remote');
   if (s.provider === 'apple' && state.settings.showAppleInLibrary === false && v.kind !== 'pl') return false;
   if (v.kind === 'pl') return !!state.playlists.find((p) => p.id === v.id)?.songs.includes(s.id);
   if (v.kind === 'album') return albumKey(s) === v.key;

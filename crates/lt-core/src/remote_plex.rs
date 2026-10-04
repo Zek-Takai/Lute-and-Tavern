@@ -239,6 +239,36 @@ impl MusicServer for Plex<'_> {
         Ok(items(&self.get(&path)?["Metadata"]))
     }
 
+    fn library_stamp(&self) -> Result<Option<String>> {
+        // Each music library's last scan and content change.
+        let v = self.get("/library/sections")?;
+        let stamp: Vec<String> = v["Directory"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|d| d["type"] == "artist")
+            .map(|d| format!("{}:{}:{}", text(d, "key"), text(d, "contentChangedAt"), text(d, "scannedAt")))
+            .collect();
+        Ok(Some(stamp.join(",")))
+    }
+
+    fn all_songs(&self) -> Result<Vec<RemoteItem>> {
+        let mut out = Vec::new();
+        for key in self.music_sections()? {
+            let mut start = 0usize;
+            loop {
+                let page = items(&self.get(&format!("/library/sections/{key}/all?type=10&X-Plex-Container-Start={start}&X-Plex-Container-Size=1000"))?["Metadata"]);
+                start += page.len();
+                let done = page.len() < 1000;
+                out.extend(page);
+                if done {
+                    break;
+                }
+            }
+        }
+        Ok(out)
+    }
+
     fn stream(&self, song_id: &str) -> Result<Target> {
         let v = self.get(&format!("/library/metadata/{song_id}"))?;
         let key = v["Metadata"][0]["Media"][0]["Part"][0]["key"].as_str().ok_or_else(|| anyhow!("Plex has no file for that song"))?;

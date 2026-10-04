@@ -9,7 +9,7 @@ use lt_core::remote::{self, MusicServer, RemoteItem, RemoteSearch};
 use lt_core::remote_plex::{self, PlexServer};
 use std::sync::Mutex;
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Emitter, Manager, State};
 
 const KEYCHAIN_SERVICE: &str = "Lute & Tavern";
 
@@ -96,9 +96,9 @@ fn device_id(lib: &lt_core::Library) -> String {
 
 /// Subsonic, Jellyfin/Emby and WebDAV: checks the server and sign-in first, then saves the connection.
 #[tauri::command]
-pub async fn connection_add(state: State<'_, AppState>, kind: String, name: String, url: String, username: String, password: String) -> Res<String> {
+pub async fn connection_add(app: AppHandle, state: State<'_, AppState>, kind: String, name: String, url: String, username: String, password: String, in_library: Option<bool>) -> Res<String> {
     let lib = state.lib.clone();
-    blocking(move || {
+    let msg = blocking(move || {
         let base = remote::normalize_url(&url)?;
         let (secret, extra, server) = match kind.as_str() {
             "jellyfin" => lt_core::remote_jellyfin::sign_in(&base, &username, &password, &device_id(&lib))?,
@@ -119,19 +119,145 @@ pub async fn connection_add(state: State<'_, AppState>, kind: String, name: Stri
             "plex" => anyhow::bail!("Plex connects with the Sign in with Plex button"),
             k => anyhow::bail!("Unknown kind of connection: {k}"),
         };
+        let mut extra = extra;
+        extra["inLibrary"] = serde_json::Value::Bool(in_library.unwrap_or(true));
         let c = lib.add_connection(&kind, &name, &base, &username, &extra)?;
         save_secret(&lib, c.id, &secret)?;
-        Ok(format!("Connected to {server}"))
+        Ok((format!("Connected to {server}"), c.id, in_library.unwrap_or(true)))
     })
-    .await
+    .await?;
+    if msg.2 {
+        start_library_sync(&app, msg.1, true);
+    }
+    Ok(msg.0)
 }
 
 #[tauri::command]
-pub async fn connection_remove(state: State<'_, AppState>, id: i64) -> Res<()> {
+pub async fn connection_remove(app: AppHandle, state: State<'_, AppState>, id: i64) -> Res<()> {
     if let Ok(k) = key_entry(id) {
         let _ = k.delete_credential();
     }
-    state.lib.remove_connection(id).map_err(|e| e.to_string())
+    state.lib.remove_remote_songs(id).map_err(|e| e.to_string())?;
+    state.lib.remove_connection(id).map_err(|e| e.to_string())?;
+    crate::emit_library_changed(&app);
+    Ok(())
+}
+
+// ---------- a server's songs in My music ----------
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncEvent {
+    id: i64,
+    /// "running", "done" or "error"
+    state: String,
+    message: String,
+}
+
+/// Reads every song on the server, fetches covers not stored yet, and makes My music match. Unless `force`,
+/// it first asks the server whether anything changed since the last sync, and stops there if not.
+fn sync_library(lib: &lt_core::Library, id: i64, force: bool, progress: &dyn Fn(String)) -> anyhow::Result<Option<lt_core::remote_library::LibrarySync>> {
+    let last = lib.connection(id)?.extra["libraryStamp"].as_str().map(String::from);
+    with_conn(lib, id, |s| {
+        let stamp = s.library_stamp().unwrap_or(None);
+        if !force && stamp.is_some() && stamp == last {
+            return Ok(None);
+        }
+        progress("Reading the song list…".into());
+        let items = s.all_songs()?;
+        let have = lib.remote_art(id)?;
+        let mut need: Vec<String> = items
+            .iter()
+            .filter(|i| i.kind == "song" && have.get(&format!("{id}:{}", i.id)).is_none_or(|a| a.is_none()))
+            .filter_map(|i| i.cover.clone())
+            .collect();
+        need.sort();
+        need.dedup();
+        let mut art = std::collections::HashMap::new();
+        for (n, c) in need.iter().enumerate() {
+            if n % 25 == 0 {
+                progress(format!("Fetching covers {}/{}…", n, need.len()));
+            }
+            if let Some(t) = s.cover(c, 600) {
+                if let Ok(bytes) = remote::fetch(&t) {
+                    if bytes.len() > 100 {
+                        if let Ok(name) = lib.store_cover(&bytes) {
+                            art.insert(c.clone(), name);
+                        }
+                    }
+                }
+            }
+        }
+        progress(format!("Adding {} songs…", items.len()));
+        let report = lib.sync_remote_songs(id, &items, &art)?;
+        if let Some(st) = stamp {
+            lib.set_connection_extra(id, "libraryStamp", serde_json::Value::String(st))?;
+        }
+        Ok(Some(report))
+    })
+}
+
+static SYNCING: Mutex<Vec<i64>> = Mutex::new(Vec::new());
+
+/// Starts a background sync of a server into My music (one at a time per server). `force` re-reads even when
+/// the server says nothing changed (the Refresh button).
+pub fn start_library_sync(app: &AppHandle, id: i64, force: bool) {
+    {
+        let mut running = SYNCING.lock().unwrap();
+        if running.contains(&id) {
+            return;
+        }
+        running.push(id);
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let state = app.state::<AppState>();
+        let send = |st: &str, msg: String| {
+            let _ = app.emit("remote-sync", SyncEvent { id, state: st.into(), message: msg });
+        };
+        let result = sync_library(&state.lib, id, force, &|m| send("running", m));
+        SYNCING.lock().unwrap().retain(|x| *x != id);
+        match result {
+            Ok(None) => send("current", "Up to date".into()),
+            Ok(Some(r)) => {
+                send("done", format!("{} songs in My music ({} new, {} gone{})", r.added + r.updated, r.added, r.removed, if r.local > 0 { format!(", {} already local", r.local) } else { String::new() }));
+                crate::emit_library_changed(&app);
+            }
+            Err(e) => {
+                crate::log::write("error", &format!("server sync {id}: {e:#}"));
+                send("error", format!("{e:#}"));
+            }
+        }
+    });
+}
+
+/// Syncs every server that has "In My music" on (app start).
+pub fn sync_all(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    for c in state.lib.connections().unwrap_or_default() {
+        if c.extra["inLibrary"].as_bool().unwrap_or(false) {
+            start_library_sync(app, c.id, false);
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn remote_library_sync(app: AppHandle, id: i64) -> Res<()> {
+    start_library_sync(&app, id, true);
+    Ok(())
+}
+
+/// Turns "In My music" on (adds the server's songs) or off (takes them out).
+#[tauri::command]
+pub async fn connection_set_in_library(app: AppHandle, state: State<'_, AppState>, id: i64, on: bool) -> Res<()> {
+    state.lib.set_connection_extra(id, "inLibrary", serde_json::Value::Bool(on)).map_err(|e| e.to_string())?;
+    if on {
+        start_library_sync(&app, id, true);
+    } else {
+        state.lib.remove_remote_songs(id).map_err(|e| e.to_string())?;
+        crate::emit_library_changed(&app);
+    }
+    Ok(())
 }
 
 // Plex sign-in: start (opens plex.tv in the browser), then the interface checks until the person approved,
@@ -162,24 +288,29 @@ pub async fn plex_login_check(state: State<'_, AppState>, pin: i64) -> Res<Optio
 }
 
 #[tauri::command]
-pub async fn plex_connect(state: State<'_, AppState>, machine: String) -> Res<String> {
+pub async fn plex_connect(app: AppHandle, state: State<'_, AppState>, machine: String) -> Res<String> {
     let lib = state.lib.clone();
-    blocking(move || {
+    let done = blocking(move || {
         let server = PLEX_ACCOUNT
             .lock()
             .unwrap()
             .as_ref()
             .and_then(|(_, list)| list.iter().find(|s| s.machine == machine).cloned())
             .ok_or_else(|| anyhow::anyhow!("Sign in with Plex again"))?;
-        let extra = remote_plex::connection_extra(&server, &device_id(&lib));
+        let mut extra = remote_plex::connection_extra(&server, &device_id(&lib));
+        extra["inLibrary"] = serde_json::Value::Bool(server.owned);
         let probe = remote::Connection { id: 0, kind: "plex".into(), name: server.name.clone(), base_url: server.uris.first().cloned().unwrap_or_default(), username: String::new(), extra: extra.clone() };
         let about = remote::server(&probe, &server.token)?.ping()?;
         let c = lib.add_connection("plex", &server.name, &probe.base_url, "", &extra)?;
         save_secret(&lib, c.id, &server.token)?;
         *PLEX_ACCOUNT.lock().unwrap() = None;
-        Ok(format!("Connected to {} ({about})", server.name))
+        Ok((format!("Connected to {} ({about})", server.name), c.id, server.owned))
     })
-    .await
+    .await?;
+    if done.2 {
+        start_library_sync(&app, done.1, true);
+    }
+    Ok(done.0)
 }
 
 /// A connected item with its cover ready to show (through the relay).

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-remote-library-sync"
+description = "Enables the remote_library_sync command without any pre-configured scope."
+commands.allow = ["remote_library_sync"]
+
+[[permission]]
+identifier = "deny-remote-library-sync"
+description = "Denies the remote_library_sync command without any pre-configured scope."
+commands.deny = ["remote_library_sync"]

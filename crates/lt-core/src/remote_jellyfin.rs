@@ -147,6 +147,27 @@ impl MusicServer for Jellyfin<'_> {
         }
     }
 
+    fn library_stamp(&self) -> Result<Option<String>> {
+        // How many songs, and when the newest change was saved.
+        let v = self.get(&format!("/Users/{}/Items?IncludeItemTypes=Audio&Recursive=true&Limit=1&SortBy=DateLastSaved&SortOrder=Descending&Fields=DateLastSaved", self.user()))?;
+        Ok(Some(format!("{}:{}", v["TotalRecordCount"], text(&v["Items"][0], "DateLastSaved"))))
+    }
+
+    fn all_songs(&self) -> Result<Vec<RemoteItem>> {
+        let mut out = Vec::new();
+        let mut start = 0usize;
+        loop {
+            let page = self.items(&format!("IncludeItemTypes=Audio&Recursive=true&SortBy=SortName&StartIndex={start}&Limit=1000"))?;
+            start += page.len();
+            let done = page.len() < 1000;
+            out.extend(page);
+            if done {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
     fn stream(&self, song_id: &str) -> Result<Target> {
         Ok(Target { url: format!("{}/Audio/{song_id}/stream?static=true", self.conn.base_url), headers: self.headers() })
     }

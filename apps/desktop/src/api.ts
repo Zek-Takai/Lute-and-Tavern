@@ -45,7 +45,7 @@ export interface ChatLine { id: number; role: 'user' | 'assistant' | 'action'; t
 export interface SpeechSettings { baseUrl: string; model: string; language: string; hasKey: boolean }
 export interface Station { uuid: string; name: string; url: string; homepage: string; favicon: string; country: string; tags: string; codec: string; bitrate: number; favorite: boolean }
 export interface RadioHome { favorites: Station[]; recent: Station[]; top: Station[]; tags: string[] }
-export interface Connection { id: number; kind: string; name: string; baseUrl: string; username: string }
+export interface Connection { id: number; kind: string; name: string; baseUrl: string; username: string; extra: { inLibrary?: boolean } & Record<string, unknown> }
 export interface RemoteItem { id: string; kind: 'song' | 'album' | 'artist' | 'playlist' | 'folder'; name: string; artist: string; album: string; year: string; genre: string; cover: string | null; duration: number | null; track: number | null; count: number | null; art: string | null }
 export interface RemoteResults { songs: RemoteItem[]; albums: RemoteItem[]; artists: RemoteItem[]; playlists: RemoteItem[]; folders: RemoteItem[] }
 export interface PlexServer { name: string; machine: string; uris: string[]; owned: boolean }
@@ -128,7 +128,9 @@ export const api = {
   radioFavorite: (station: Station, on: boolean) => invoke<void>('radio_favorite', { station, on }),
   radioPlay: (station: Station) => invoke<string>('radio_play', { station }),
   connections: () => invoke<Connection[]>('connections_list'),
-  connectionAdd: (kind: string, name: string, url: string, username: string, password: string) => invoke<string>('connection_add', { kind, name, url, username, password }),
+  connectionAdd: (kind: string, name: string, url: string, username: string, password: string, inLibrary: boolean) => invoke<string>('connection_add', { kind, name, url, username, password, inLibrary }),
+  remoteLibrarySync: (id: number) => invoke<void>('remote_library_sync', { id }),
+  connectionSetInLibrary: (id: number, on: boolean) => invoke<void>('connection_set_in_library', { id, on }),
   connectionRemove: (id: number) => invoke<void>('connection_remove', { id }),
   plexLoginStart: () => invoke<number>('plex_login_start'),
   plexLoginCheck: (pin: number) => invoke<PlexServer[] | null>('plex_login_check', { pin }),

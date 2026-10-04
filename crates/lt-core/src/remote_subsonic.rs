@@ -89,6 +89,47 @@ impl MusicServer for Subsonic<'_> {
         })
     }
 
+    fn all_songs(&self) -> Result<Vec<RemoteItem>> {
+        // Album by album (the one listing every Subsonic server supports), six albums at a time.
+        let mut albums = Vec::new();
+        let mut offset = 0usize;
+        loop {
+            let off = offset.to_string();
+            let page = list(&self.call("getAlbumList2.view", &[("type", "alphabeticalByName"), ("size", "500"), ("offset", &off)])?["albumList2"]["album"], album);
+            offset += page.len();
+            let done = page.len() < 500;
+            albums.extend(page);
+            if done {
+                break;
+            }
+        }
+        let chunks: Vec<&[RemoteItem]> = albums.chunks(albums.len().div_ceil(6).max(1)).collect();
+        let results: Vec<Result<Vec<RemoteItem>>> = std::thread::scope(|sc| {
+            let handles: Vec<_> = chunks
+                .iter()
+                .map(|chunk| sc.spawn(move || -> Result<Vec<RemoteItem>> {
+                    let mut out = Vec::new();
+                    for a in *chunk {
+                        out.extend(self.open("album", &a.id)?);
+                    }
+                    Ok(out)
+                }))
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap_or_else(|_| Err(anyhow::anyhow!("a reader stopped")))).collect()
+        });
+        let mut out = Vec::new();
+        for r in results {
+            out.extend(r?);
+        }
+        Ok(out)
+    }
+
+    fn library_stamp(&self) -> Result<Option<String>> {
+        // getIndexes carries the library's last-modified time (milliseconds).
+        let r = self.call("getIndexes.view", &[])?;
+        Ok(r["indexes"]["lastModified"].as_i64().map(|t| t.to_string()))
+    }
+
     fn stream(&self, song_id: &str) -> Result<Target> {
         Ok(Target::plain(self.url("stream.view", &[("id", song_id), ("format", "raw")])))
     }
@@ -153,5 +194,39 @@ mod tests {
         assert_eq!((items[0].id.as_str(), items[0].name.as_str(), items[0].cover.as_deref()), ("7", "Song", Some("al-1")));
         assert_eq!(list(&json!([{"id": "1", "name": "Al"}, {"id": "2", "name": "B"}]), album).len(), 2);
         assert!(list(&Value::Null, song).is_empty());
+    }
+
+    #[test]
+    fn reads_every_song_album_by_album_and_reports_a_stamp() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        std::thread::spawn(move || {
+            for req in server.incoming_requests() {
+                let url = req.url().to_string();
+                let body = if url.contains("getAlbumList2") {
+                    let albums: Vec<Value> = (0..13).map(|i| json!({"id": format!("al{i}"), "name": format!("Album {i}")})).collect();
+                    json!({"albumList2": {"album": albums}})
+                } else if url.contains("getAlbum.view") {
+                    let id = url.split("id=").nth(1).unwrap().split('&').next().unwrap().to_string();
+                    json!({"album": {"song": [{"id": format!("{id}-1"), "title": "A"}, {"id": format!("{id}-2"), "title": "B"}]}})
+                } else if url.contains("getIndexes") {
+                    json!({"indexes": {"lastModified": 1790000000000i64}})
+                } else {
+                    json!({})
+                };
+                let mut r = body;
+                r["status"] = json!("ok");
+                let _ = req.respond(tiny_http::Response::from_string(json!({"subsonic-response": r}).to_string()));
+            }
+        });
+        let c = Connection { id: 1, kind: "subsonic".into(), name: "NC".into(), base_url: format!("http://127.0.0.1:{port}"), username: "listener".into(), extra: json!({"legacyAuth": true}) };
+        let s = Subsonic { conn: &c, password: "x" };
+        let songs = s.all_songs().unwrap();
+        assert_eq!(songs.len(), 26, "13 albums x 2 songs, read in parallel");
+        let mut ids: Vec<String> = songs.iter().map(|x| x.id.clone()).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), 26);
+        assert_eq!(s.library_stamp().unwrap().as_deref(), Some("1790000000000"));
     }
 }

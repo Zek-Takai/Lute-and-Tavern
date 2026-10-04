@@ -12,6 +12,7 @@ pub mod organize;
 pub mod radio;
 pub mod remote;
 pub mod remote_jellyfin;
+pub mod remote_library;
 pub mod remote_plex;
 pub mod remote_subsonic;
 pub mod remote_webdav;

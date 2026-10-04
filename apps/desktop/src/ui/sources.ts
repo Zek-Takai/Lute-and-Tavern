@@ -12,6 +12,8 @@ import { openSettings } from './settings';
 
 let relay = '';
 export let connections: Connection[] = [];
+/** Latest sync message per server (for Settings). */
+export const syncStatus = new Map<number, { state: string; message: string }>();
 const onConnections = new Set<() => void>();
 export const onConnectionsChange = (fn: () => void) => onConnections.add(fn);
 
@@ -318,6 +320,14 @@ export async function initSources() {
     return api.remoteStream(Number(id), song);
   };
   aiHooks.play_station = (cmd) => playStation(cmd.station as Station);
+  await listen<{ id: number; state: string; message: string }>('remote-sync', (e) => {
+    syncStatus.set(e.payload.id, { state: e.payload.state, message: e.payload.message });
+    const el = document.querySelector<HTMLElement>(`[data-sync-status="${e.payload.id}"]`);
+    if (el) el.textContent = e.payload.message;
+    const name = connections.find((c) => c.id === e.payload.id)?.name ?? 'Server';
+    if (e.payload.state === 'done') toast(`${name}: ${e.payload.message}`);
+    if (e.payload.state === 'error') toast(`${name}: ${e.payload.message}`);
+  });
   // Station song titles arrive from the relay while a station plays.
   await listen<{ stream: string; title: string }>('radio-title', (e) => {
     for (const st of stations.values()) {

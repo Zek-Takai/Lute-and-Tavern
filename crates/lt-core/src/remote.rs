@@ -24,8 +24,7 @@ pub struct Connection {
     pub name: String,
     pub base_url: String,
     pub username: String,
-    /// Non-secret details per kind (Plex server id and addresses, Jellyfin user id...)
-    #[serde(skip)]
+    /// Non-secret details per kind (Plex server id and addresses, Jellyfin user id, inLibrary...)
     pub extra: Value,
 }
 
@@ -95,6 +94,13 @@ pub trait MusicServer {
             }
             _ => Ok(self.open(kind, id)?.into_iter().filter(|s| s.kind == "song").collect()),
         }
+    }
+    /// Every song on the server (for adding the server's music to My music).
+    fn all_songs(&self) -> Result<Vec<RemoteItem>>;
+    /// A cheap "what state is the library in" stamp: when it is unchanged since the last sync, nothing needs
+    /// re-reading. None when the server can't say (then a sync always re-reads).
+    fn library_stamp(&self) -> Result<Option<String>> {
+        Ok(None)
     }
     /// The original audio of a song (so seeking works and quality is untouched).
     fn stream(&self, song_id: &str) -> Result<Target>;
@@ -173,6 +179,29 @@ pub fn normalize_url(raw: &str) -> Result<String> {
     }
     reqwest::Url::parse(&u).map_err(|e| anyhow!("That address doesn't look right: {e}"))?;
     Ok(u)
+}
+
+/// Downloads a target (a cover image) with its sign-in headers.
+pub fn fetch(t: &Target) -> Result<Vec<u8>> {
+    let mut req = http()?.get(&t.url);
+    for (k, v) in &t.headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    let res = req.send()?.error_for_status()?;
+    Ok(res.bytes()?.to_vec())
+}
+
+impl Library {
+    /// Changes one non-secret detail of a connection (e.g. `inLibrary`).
+    pub fn set_connection_extra(&self, id: i64, key: &str, value: Value) -> Result<Connection> {
+        let mut c = self.connection(id)?;
+        if !c.extra.is_object() {
+            c.extra = serde_json::json!({});
+        }
+        c.extra[key] = value;
+        self.db().execute("UPDATE connections SET extra = ?2 WHERE id = ?1", params![id, c.extra.to_string()])?;
+        Ok(c)
+    }
 }
 
 pub(crate) fn http() -> Result<reqwest::blocking::Client> {

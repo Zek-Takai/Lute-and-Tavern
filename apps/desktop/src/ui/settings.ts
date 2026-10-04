@@ -3,7 +3,7 @@ import { audioDir, join } from '@tauri-apps/api/path';
 import { message, open as pickFolder } from '@tauri-apps/plugin-dialog';
 import { api, errText, type McpInfo, type PlexServer, type SpeechSettings, type SyncSettings, type UpdateInfo } from '../api';
 import { comboOf, DEFAULT_KEYS, keyLabel } from './assistant';
-import { connections, loadConnections } from './sources';
+import { connections, loadConnections, syncStatus } from './sources';
 import { applyLineColor, applySkin, LINE_COLORS, SKINS } from '../player';
 import { appleStatus, connectApple, disconnectApple, forgetAppleKey, isConnected, musicKit, setAppleKey, type AppleStatus } from '../apple';
 import { libraryFolder, reload, rerender, saveSetting, state } from '../state';
@@ -249,7 +249,10 @@ function render() {
     <section class="set-sec" id="setServers">
       <h3>Your music servers</h3>
       <p class="muted small">Play music you keep elsewhere: a server on a device you own (a NAS or home computer) or a cloud server you run. It's just an address, so it works at home, over the internet or through a VPN. Sign-ins are kept in the system keychain.</p>
-      <ul class="set-list">${connections.map((c) => `<li><span><b>${esc(c.name)}</b> <span class="muted small">${esc(KIND_NAME[c.kind] ?? c.kind)}, ${esc(c.baseUrl)}</span></span><button class="btn small" data-rm-conn="${c.id}">Remove</button></li>`).join('') || '<li class="muted">None yet.</li>'}</ul>
+      <ul class="set-list">${connections.map((c) => `<li class="conn-row"><span><b>${esc(c.name)}</b> <span class="muted small">${esc(KIND_NAME[c.kind]?.split(':')[0].split(' (')[0] ?? c.kind)}, ${esc(c.baseUrl)}</span>
+        <br><label class="small"><input type="checkbox" data-in-lib="${c.id}" ${c.extra?.inLibrary ? 'checked' : ''}> In My music (its songs show in your library and stream from it)</label>
+        <br><span class="muted small" data-sync-status="${c.id}">${esc(syncStatus.get(c.id)?.message ?? '')}</span></span>
+        <span class="row">${c.extra?.inLibrary ? `<button class="btn small" data-sync-conn="${c.id}">Refresh</button>` : ''}<button class="btn small" data-rm-conn="${c.id}">Remove</button></span></li>`).join('') || '<li class="muted">None yet.</li>'}</ul>
       <div class="form">
         <label for="cKind">Kind</label><select id="cKind">${Object.entries(KIND_NAME).map(([k, l]) => `<option value="${k}" ${k === addKind ? 'selected' : ''}>${l}</option>`).join('')}</select>
       </div>
@@ -263,6 +266,7 @@ function render() {
         <label for="cUser">Username</label><input id="cUser" autocomplete="off">
         <label for="cPass">Password</label><input id="cPass" type="password" autocomplete="off">
       </div>
+      <label class="row small"><input type="checkbox" id="cInLib" checked> Add its songs to My music (streamed from the server; songs you have as local files stay local)</label>
       <div class="row"><button class="btn primary" id="cAdd">Connect</button><span class="muted small" id="cStatus"></span></div>`}
     </section>
 
@@ -583,7 +587,7 @@ function render() {
     }
     st('Checking the server…');
     try {
-      const msg = await api.connectionAdd(v('#cKind'), v('#cName'), v('#cUrl'), v('#cUser'), v('#cPass'));
+      const msg = await api.connectionAdd(addKind, v('#cName'), v('#cUrl'), v('#cUser'), v('#cPass'), $<HTMLInputElement>('#cInLib').checked);
       await loadConnections();
       render();
       toast(msg);
@@ -591,6 +595,14 @@ function render() {
       st(errText(e));
     }
   });
+  document.querySelectorAll<HTMLInputElement>('[data-in-lib]').forEach((b) => (b.onchange = async () => {
+    const id = Number(b.dataset.inLib);
+    await api.connectionSetInLibrary(id, b.checked).catch((e) => toast(errText(e)));
+    await loadConnections();
+    render();
+    if (!b.checked) await reload();
+  }));
+  document.querySelectorAll<HTMLElement>('[data-sync-conn]').forEach((b) => (b.onclick = () => void api.remoteLibrarySync(Number(b.dataset.syncConn)).catch((e) => toast(errText(e)))));
   document.querySelectorAll<HTMLElement>('[data-rm-conn]').forEach((b) => (b.onclick = async () => {
     await api.connectionRemove(Number(b.dataset.rmConn)).catch((e) => toast(errText(e)));
     await loadConnections();
