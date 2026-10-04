@@ -31,12 +31,17 @@ export async function addMusicFolder() {
 
 let updates: UpdateInfo = { canUpdate: false, currentVersion: '', defaultUrl: '' };
 let speech: SpeechSettings = { baseUrl: '', model: '', language: '', hasKey: false };
-const KIND_NAME: Record<string, string> = { plex: 'Plex', jellyfin: 'Jellyfin or Emby', subsonic: 'Subsonic server (Navidrome, Airsonic, Gonic, Ampache…)', webdav: 'WebDAV folder (Nextcloud, NAS file sharing…)' };
+const KIND_NAME: Record<string, string> = {
+  plex: 'Plex',
+  jellyfin: 'Jellyfin or Emby',
+  subsonic: 'Music server: Nextcloud Music, Navidrome, Airsonic, Gonic, Ampache… (Subsonic API)',
+  webdav: 'Plain file folder over WebDAV (files only, no music features)',
+};
 const KIND_HELP: Record<string, string> = {
   plex: 'Sign in with your Plex account in the browser; the app finds your Plex servers and you pick one. Nothing to install.',
   jellyfin: 'Your Jellyfin or Emby address and account. The app signs in once and keeps only the access token, not your password.',
-  subsonic: 'For servers that speak the Subsonic API. The server only ever receives a one-time token, never your password.',
-  webdav: 'A music folder shared over WebDAV, played as it is. Folders in the Lute & Tavern layout show their artists and albums.',
+  subsonic: 'For music servers with playlists, albums and search. <b>Nextcloud:</b> use <code>https://your-nextcloud/apps/music/subsonic</code> and the API password from Nextcloud Music › Settings › Ampache and Subsonic (not your login). Other servers: their address and account.',
+  webdav: 'Plays music straight from a shared folder, browsed as folders, with no playlists or music search. Use it for plain NAS shares or rclone. For Nextcloud, choose the Music server kind instead.',
 };
 let addKind = 'plex';
 let syncCfg: SyncSettings = { kind: 'none', address: 'http://127.0.0.1:8384', command: '', hasKey: false };
@@ -563,6 +568,19 @@ function render() {
   document.getElementById('cAdd')?.addEventListener('click', async () => {
     const v = (id: string) => $<HTMLInputElement>(id).value;
     const st = (t: string) => ($('#cStatus').textContent = t);
+    // A music-server address typed under WebDAV: switch to the kind it really is.
+    if (addKind === 'webdav' && /\/apps\/music\/subsonic|\/rest\/?$/i.test(v('#cUrl'))) {
+      const keep = { name: v('#cName'), url: v('#cUrl'), user: v('#cUser'), pass: v('#cPass') };
+      addKind = 'subsonic';
+      render();
+      $<HTMLInputElement>('#cName').value = keep.name;
+      $<HTMLInputElement>('#cUrl').value = keep.url;
+      $<HTMLInputElement>('#cUser').value = keep.user;
+      $<HTMLInputElement>('#cPass').value = keep.pass;
+      $('#setServers')?.scrollIntoView({ block: 'nearest' });
+      $('#cStatus').textContent = 'That is a music-server address, so the kind was switched to Music server. Check the password is the Music API password, then Connect.';
+      return;
+    }
     st('Checking the server…');
     try {
       const msg = await api.connectionAdd(v('#cKind'), v('#cName'), v('#cUrl'), v('#cUser'), v('#cPass'));

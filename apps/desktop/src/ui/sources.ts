@@ -256,7 +256,7 @@ export function serversPanel() {
   return (
     connections
       .map((c) => `<button class="nav" data-remote-open="${c.id}" aria-pressed="${v.kind === 'remote' && v.id === c.id}"><span>${esc(c.name)}</span></button>`)
-      .join('') || '<p class="muted small side-empty">Connect music you keep elsewhere: Plex, Jellyfin or Emby, a Subsonic server (Navidrome and others) or a WebDAV folder.</p>'
+      .join('') || '<p class="muted small side-empty">Connect music you keep elsewhere: Plex, Jellyfin or Emby, a music server (Nextcloud Music, Navidrome and others) or a plain WebDAV folder.</p>'
   ) + '<button class="btn small" data-add-server>Add a server…</button>';
 }
 
