@@ -3,6 +3,7 @@ import { audioDir, join } from '@tauri-apps/api/path';
 import { message, open as pickFolder } from '@tauri-apps/plugin-dialog';
 import { api, errText, type McpInfo, type SpeechSettings, type UpdateInfo } from '../api';
 import { comboOf, DEFAULT_KEYS, keyLabel } from './assistant';
+import { connections, loadConnections } from './sources';
 import { applyLineColor, applySkin, LINE_COLORS, SKINS } from '../player';
 import { appleStatus, connectApple, disconnectApple, forgetAppleKey, isConnected, musicKit, setAppleKey, type AppleStatus } from '../apple';
 import { libraryFolder, reload, rerender, saveSetting, state } from '../state';
@@ -79,7 +80,7 @@ export async function addSongsToLibrary(paths: string[]) {
   }
 }
 
-export async function openSettings(section?: 'writer') {
+export async function openSettings(section?: 'writer' | 'servers') {
   state.writer = await api.writerConfig();
   updates = await api.updateInfo();
   mcp = await api.mcpInfo().catch(() => mcp);
@@ -90,6 +91,10 @@ export async function openSettings(section?: 'writer') {
   const d = $<HTMLDialogElement>('#set');
   if (!d.open) d.showModal();
   if (section === 'writer') $('#wUrl')?.focus();
+  if (section === 'servers') {
+    $('#setServers')?.scrollIntoView({ block: 'start' });
+    $('#cName')?.focus();
+  }
 }
 
 function render() {
@@ -192,6 +197,20 @@ function render() {
       <div class="form"><label>Address</label><input readonly value="${esc(mcp.url)}"></div>
       <div class="row"><button class="btn small" id="mcpCopyUrl">Copy address</button><button class="btn small" id="mcpCopyToken">Copy token</button><button class="btn small" id="mcpCopyCfg">Copy setup for your AI app</button><button class="btn small" id="mcpNew">New token</button></div>
       <p class="muted small">The token is kept in your system keychain. Give it only to apps you trust; New token cuts off every app using the old one.</p>` : ''}
+    </section>
+
+    <section class="set-sec" id="setServers">
+      <h3>Your music servers</h3>
+      <p class="muted small">Play music you keep elsewhere: a server on a device you own (a NAS or home computer) or a cloud server you run. Anything that speaks the Subsonic API works: Navidrome, Airsonic, Gonic, Ampache, Funkwhale and many NAS music apps. It's just an address, so it works at home, over the internet or through a VPN. Your password is kept in the system keychain; the server only ever receives a one-time token.</p>
+      <ul class="set-list">${connections.map((c) => `<li><span><b>${esc(c.name)}</b> <span class="muted small">${esc(c.username)} at ${esc(c.baseUrl)}</span></span><button class="btn small" data-rm-conn="${c.id}">Remove</button></li>`).join('') || '<li class="muted">None yet.</li>'}</ul>
+      <div class="form">
+        <label for="cKind">Kind</label><select id="cKind"><option value="subsonic">Subsonic-compatible server</option></select>
+        <label for="cName">Name</label><input id="cName" placeholder="Home NAS">
+        <label for="cUrl">Address</label><input id="cUrl" placeholder="http://192.168.1.20:4533 or https://music.example.com">
+        <label for="cUser">Username</label><input id="cUser" autocomplete="off">
+        <label for="cPass">Password</label><input id="cPass" type="password" autocomplete="off">
+      </div>
+      <div class="row"><button class="btn primary" id="cAdd">Connect</button><span class="muted small" id="cStatus"></span></div>
     </section>
 
     <section class="set-sec">
@@ -413,6 +432,24 @@ function render() {
     render();
     toast('Key removed from your keychain');
   });
+  $('#cAdd').onclick = async () => {
+    const v = (id: string) => $<HTMLInputElement>(id).value;
+    const st = (t: string) => ($('#cStatus').textContent = t);
+    st('Checking the server…');
+    try {
+      const msg = await api.connectionAdd(v('#cKind'), v('#cName'), v('#cUrl'), v('#cUser'), v('#cPass'));
+      await loadConnections();
+      render();
+      toast(msg);
+    } catch (e) {
+      st(errText(e));
+    }
+  };
+  document.querySelectorAll<HTMLElement>('[data-rm-conn]').forEach((b) => (b.onclick = async () => {
+    await api.connectionRemove(Number(b.dataset.rmConn)).catch((e) => toast(errText(e)));
+    await loadConnections();
+    render();
+  }));
   $('#wExclude').onchange = (e) => void saveSetting('writerExclude', (e.target as HTMLInputElement).checked);
   $('#mcpOn').onchange = async (e) => {
     mcp = await api.mcpSetEnabled((e.target as HTMLInputElement).checked).catch((err) => ({ ...mcp, error: errText(err) }));

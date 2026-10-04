@@ -2859,6 +2859,7 @@ dependencies = [
  "flacenc",
  "hound",
  "lofty",
+ "md-5",
  "mime_guess",
  "reqwest",
  "rusqlite",
@@ -2875,6 +2876,7 @@ name = "lute-and-tavern"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "getrandom 0.3.4",
  "jsonwebtoken",
  "keyring",
@@ -2883,6 +2885,7 @@ dependencies = [
  "notify",
  "notify-debouncer-mini",
  "percent-encoding",
+ "reqwest",
  "serde",
  "serde_json",
  "tauri",

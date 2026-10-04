@@ -150,3 +150,10 @@ nav.rail { position: sticky; top: 16px; display: flex; flex-direction: column; a
 .qdrop .more{display:block;width:100%;text-align:left;padding:8px 10px;border-radius:9px;background:none;border:0;color:inherit;font:inherit}
 .qdrop .more:hover{background:var(--line)}
 .qdrop p{margin:8px 10px}
+
+/* radio and connected servers */
+.src-radio { color: #8fd3ff; border-color: rgba(143,211,255,.4); background: rgba(45,160,250,.12); }
+.src-remote { color: #b9f0a8; border-color: rgba(185,240,168,.4); background: rgba(80,200,90,.12); }
+.card .fav{min-width:34px;justify-content:center;padding:4px 8px}
+.card .fav[aria-pressed="true"]{color:#e76f8a}
+.tag-row{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px}

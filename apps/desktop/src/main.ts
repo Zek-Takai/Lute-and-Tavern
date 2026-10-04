@@ -17,6 +17,7 @@ import { onRender, reload, state, visible, writerName } from './state';
 import { initLibrary, renderChips, renderGrid, renderHead, renderSide } from './ui/library';
 import { initAssistant } from './ui/assistant';
 import { initSearch } from './ui/search';
+import { initSources } from './ui/sources';
 import { addMusicFolder, addSongsToLibrary, checkForUpdatesAtStart, chooseLibrary, openSettings } from './ui/settings';
 import { initSheetKeys } from './ui/sheet';
 import { initApple } from './ui/apple';
@@ -151,6 +152,7 @@ async function boot() {
   initLibrary({ addFolder: () => void addMusicFolder(), request: () => void openRequest(), setupLibrary: (suggested: boolean) => void chooseLibrary(suggested), settings: () => void openSettings() });
   initSong();
   initApple();
+  await initSources();
   initSearch();
   onAppleChange(() => renderAll());
   initSheetKeys(() => $<HTMLDialogElement>('#dlg').open && activeTab() === 'sheet');

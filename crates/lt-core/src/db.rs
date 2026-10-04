@@ -146,6 +146,30 @@ const MIGRATIONS: &[&str] = &[
         created_at INTEGER NOT NULL
     );
     "#,
+    // v8: internet radio stations the person saved or played, and connections to their own music servers.
+    r#"
+    CREATE TABLE stations (
+        uuid        TEXT PRIMARY KEY,
+        name        TEXT NOT NULL,
+        url         TEXT NOT NULL,
+        homepage    TEXT NOT NULL DEFAULT '',
+        favicon     TEXT NOT NULL DEFAULT '',
+        country     TEXT NOT NULL DEFAULT '',
+        tags        TEXT NOT NULL DEFAULT '',
+        codec       TEXT NOT NULL DEFAULT '',
+        bitrate     INTEGER NOT NULL DEFAULT 0,
+        favorite    INTEGER NOT NULL DEFAULT 0,
+        last_played INTEGER
+    );
+    CREATE TABLE connections (
+        id         INTEGER PRIMARY KEY,
+        kind       TEXT NOT NULL,
+        name       TEXT NOT NULL,
+        base_url   TEXT NOT NULL,
+        username   TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL
+    );
+    "#,
 ];
 
 pub fn open(path: &std::path::Path) -> Result<Connection> {

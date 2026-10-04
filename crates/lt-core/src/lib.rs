@@ -9,6 +9,8 @@ pub mod genre;
 pub mod library;
 pub mod mcp;
 pub mod organize;
+pub mod radio;
+pub mod remote;
 pub mod songwriter;
 pub mod tags;
 

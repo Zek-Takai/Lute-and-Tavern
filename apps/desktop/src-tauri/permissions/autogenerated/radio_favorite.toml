@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-radio-favorite"
+description = "Enables the radio_favorite command without any pre-configured scope."
+commands.allow = ["radio_favorite"]
+
+[[permission]]
+identifier = "deny-radio-favorite"
+description = "Denies the radio_favorite command without any pre-configured scope."
+commands.deny = ["radio_favorite"]

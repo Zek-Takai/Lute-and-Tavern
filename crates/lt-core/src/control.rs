@@ -13,7 +13,7 @@ const NAMES: &[&str] = &[
     "library_overview", "search_songs", "get_song", "update_song", "list_playlists", "get_playlist",
     "create_playlist", "add_to_playlist", "remove_from_playlist", "reorder_playlist", "rename_playlist",
     "delete_playlist", "create_genre_tag", "rename_genre_tag", "delete_genre_tag", "rescan_library",
-    "play", "queue_songs", "playback", "now_playing",
+    "play", "queue_songs", "playback", "now_playing", "search_radio", "play_radio",
 ];
 
 pub fn handles(name: &str) -> bool {
@@ -80,6 +80,14 @@ pub fn tools() -> Value {
          "inputSchema": obj(json!({"song_ids": ids, "play_next": {"type": "boolean"}}), &["song_ids"]), "annotations": edit},
         {"name": "playback", "title": "Playback controls",
          "inputSchema": obj(json!({"action": {"type": "string", "enum": ["pause", "resume", "next", "previous", "stop"]}}), &["action"]),
+         "annotations": edit},
+        {"name": "search_radio", "title": "Search radio stations",
+         "description": "Finds internet radio stations (most real FM/AM stations stream online): by name or city, genre tag (jazz, news, classic rock...) and two-letter country code. Returns uuids for play_radio.",
+         "inputSchema": obj(json!({"query": {"type": "string"}, "genre": {"type": "string"}, "country": {"type": "string", "description": "e.g. US, GB, DE"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 50}}), &[]), "annotations": ro},
+        {"name": "play_radio", "title": "Play a radio station",
+         "description": "Plays a station in the app: give its uuid from search_radio, or a query (name/genre) to play the best match.",
+         "inputSchema": obj(json!({"uuid": {"type": "string"}, "query": {"type": "string"}, "genre": {"type": "string"}, "country": {"type": "string"}}), &[]),
          "annotations": edit},
         {"name": "now_playing", "title": "What's playing", "description": "The current song, whether it is paused, and the queue.",
          "inputSchema": obj(json!({}), &[]), "annotations": ro},
@@ -327,6 +335,25 @@ pub fn call(cx: &Context, name: &str, a: &Value) -> Result<(Value, Effects)> {
             Ok((json!({"done": action}), Effects { ui: Some(json!({"action": action})), ..Default::default() }))
         }
         "now_playing" => Ok((now_playing(lib), none)),
+        "search_radio" | "play_radio" => {
+            let s = |k: &str| a[k].as_str().unwrap_or("").trim().to_string();
+            let uuid = s("uuid");
+            let found: Vec<crate::radio::Station> = if !uuid.is_empty() {
+                match lib.station(&uuid)? {
+                    Some(st) => vec![st],
+                    None => crate::radio::search("", "", "", 200)?.into_iter().filter(|st| st.uuid == uuid).collect(),
+                }
+            } else {
+                crate::radio::search(&s("query"), &s("genre").to_lowercase(), &s("country").to_uppercase(), a["limit"].as_u64().unwrap_or(10).clamp(1, 50) as usize)?
+            };
+            if name == "search_radio" {
+                let rows: Vec<Value> = found.iter().map(|st| json!({"uuid": st.uuid, "name": st.name, "country": st.country, "genres": st.tags, "bitrate": st.bitrate})).collect();
+                return Ok((json!({"stations": rows}), none));
+            }
+            let st = found.into_iter().next().ok_or_else(|| anyhow!("No station matches that"))?;
+            let ui = json!({"action": "play_station", "station": st});
+            Ok((json!({"playing": st.name, "country": st.country}), Effects { ui: Some(ui), ..Default::default() }))
+        }
         _ => bail!("Unknown tool: {name}"),
     }
 }

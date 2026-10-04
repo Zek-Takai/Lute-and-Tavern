@@ -144,7 +144,7 @@ function paintScrub(cur: number, dur: number) {
   $('#pProg').style.width = pct + '%';
   $('#pHead').style.left = pct + '%';
   $('#pCur').textContent = fmt(cur);
-  $('#pDur').textContent = dur ? fmt(dur) : '0:00';
+  $('#pDur').textContent = nowSong?.provider === 'radio' ? 'Live' : dur ? fmt(dur) : '0:00';
 }
 
 /** Remembers the song, its list and the place in it, so the app can pick up where it left off. */
@@ -170,6 +170,14 @@ export function restoreNowPlaying() {
   paintScrub(resumeAt, s.duration ?? 0);
 }
 
+/** Where streamed songs get their audio address, by provider (radio, connected servers). Set by ui/sources.ts. */
+export const streamSources: Record<string, (s: Song) => Promise<string>> = {};
+
+/** Shows a station's current song under its name. */
+export function setNowSub(songId: number, text: string) {
+  if (nowSong?.id === songId) $('#pSub').textContent = text;
+}
+
 export function playSong(s: Song, list?: Song[]) {
   if (list) {
     queue = list.filter(playable);
@@ -179,6 +187,13 @@ export function playSong(s: Song, list?: Song[]) {
   if (playing && playing.id === String(s.id)) return togglePause();
   const startAt = nowSong?.id === s.id ? resumeAt : 0;
   if (s.provider === 'apple') return void startApple(s, startAt);
+  const stream = streamSources[s.provider];
+  if (stream) {
+    stream(s)
+      .then((url) => playFile(url, s, s.artist || s.album, String(s.id), s.provider === 'radio' ? 0 : startAt))
+      .catch((e) => toast(`Could not play "${s.title}": ${e}`));
+    return;
+  }
   if (s.hasFile) playFile(lt('audio', s.id), s, [s.artist, s.album].filter(Boolean).join(', '), String(s.id), startAt);
   else if (s.stems > 0) void playStems(s, startAt);
   else if (s.notes.length) playMelody(s);
@@ -412,7 +427,12 @@ export function enqueue(songs: Song[], next: boolean) {
 }
 
 /** Carries out a request from a connected AI app (Settings › AI apps › Full control). */
+/** Extra AI actions other modules handle (e.g. play_station in ui/sources.ts). */
+export const aiHooks: Record<string, (cmd: Record<string, unknown>) => void> = {};
+
 export function aiControl(cmd: { action: string; songIds?: number[]; shuffle?: boolean; next?: boolean }) {
+  const hook = aiHooks[cmd.action];
+  if (hook) return hook(cmd as Record<string, unknown>);
   const songs = (cmd.songIds ?? []).map((id) => byId(id)).filter((s): s is Song => !!s && playable(s));
   switch (cmd.action) {
     case 'play': {
@@ -560,7 +580,8 @@ function showNow(s: Song, sub: string) {
 
 /** After the library reloads, keep queue entries pointing at fresh song objects. */
 export function refreshQueue() {
-  queue = queue.map((s) => byId(s.id)).filter((s): s is Song => !!s);
+  // Streamed songs (radio, servers, unsaved Apple Music) aren't in the library; keep them as they are.
+  queue = queue.map((s) => (s.id < 0 ? s : byId(s.id))).filter((s): s is Song => !!s);
   if (nowSong) nowSong = byId(nowSong.id) ?? nowSong;
   qi = nowSong ? queue.findIndex((s) => s.id === nowSong!.id) : -1;
 }

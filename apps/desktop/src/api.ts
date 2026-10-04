@@ -43,6 +43,11 @@ export interface Song {
 }
 export interface ChatLine { id: number; role: 'user' | 'assistant' | 'action'; text: string; createdAt: number }
 export interface SpeechSettings { baseUrl: string; model: string; language: string; hasKey: boolean }
+export interface Station { uuid: string; name: string; url: string; homepage: string; favicon: string; country: string; tags: string; codec: string; bitrate: number; favorite: boolean }
+export interface RadioHome { favorites: Station[]; recent: Station[]; top: Station[]; tags: string[] }
+export interface Connection { id: number; kind: string; name: string; baseUrl: string; username: string }
+export interface RemoteItem { id: string; kind: 'song' | 'album' | 'artist' | 'playlist'; name: string; artist: string; album: string; year: string; genre: string; cover: string | null; duration: number | null; track: number | null; count: number | null; art: string | null }
+export interface RemoteResults { songs: RemoteItem[]; albums: RemoteItem[]; artists: RemoteItem[]; playlists: RemoteItem[] }
 export interface McpInfo { enabled: boolean; running: boolean; url: string; error: string | null }
 export interface Take { id: number; name: string; origin: string; addedAt: number; versionId: number | null }
 export interface Version { id: number; label: string; note: string; createdAt: number }
@@ -104,6 +109,19 @@ export const api = {
   logEvent: (level: string, message: string) => invoke<void>('log_event', { level, message }).catch(() => {}),
   updateInfo: () => invoke<UpdateInfo>('update_info'),
   mcpInfo: () => invoke<McpInfo>('mcp_info'),
+  relayBase: () => invoke<string>('relay_base'),
+  radioSearch: (name: string, tag = '', country = '', limit = 60) => invoke<Station[]>('radio_search', { name, tag, country, limit }),
+  radioHome: () => invoke<RadioHome>('radio_home'),
+  radioFavorite: (station: Station, on: boolean) => invoke<void>('radio_favorite', { station, on }),
+  radioPlay: (station: Station) => invoke<string>('radio_play', { station }),
+  connections: () => invoke<Connection[]>('connections_list'),
+  connectionAdd: (kind: string, name: string, url: string, username: string, password: string) => invoke<string>('connection_add', { kind, name, url, username, password }),
+  connectionRemove: (id: number) => invoke<void>('connection_remove', { id }),
+  remoteSearch: (id: number, query: string) => invoke<RemoteResults>('remote_search', { id, query }),
+  remoteHome: (id: number) => invoke<RemoteResults>('remote_home', { id }),
+  remoteOpen: (id: number, kind: string, item: string) => invoke<RemoteItem[]>('remote_open', { id, kind, item }),
+  remoteSongs: (id: number, kind: string, item: string) => invoke<RemoteItem[]>('remote_songs', { id, kind, item }),
+  remoteStream: (id: number, song: string) => invoke<string>('remote_stream', { id, song }),
   assistantHistory: () => invoke<ChatLine[]>('assistant_history'),
   assistantSend: (text: string) => invoke<void>('assistant_send', { text }),
   assistantClear: () => invoke<void>('assistant_clear'),

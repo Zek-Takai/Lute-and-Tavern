@@ -5,6 +5,8 @@ mod log;
 mod mcp;
 mod musickit;
 mod protocol;
+mod relay;
+mod sources;
 mod secure;
 mod updates;
 mod watch;
@@ -404,6 +406,9 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("lt", protocol::handle)
         .setup(|app| {
             main_window(app)?;
+            if let Err(e) = relay::start(app.handle()) {
+                log::write("error", &e);
+            }
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
                 let handle = app.handle().clone();
@@ -498,6 +503,19 @@ pub fn run() {
             updates::check_update,
             updates::install_update,
             mcp::mcp_info,
+            relay::relay_base,
+            sources::radio_search,
+            sources::radio_home,
+            sources::radio_favorite,
+            sources::radio_play,
+            sources::connections_list,
+            sources::connection_add,
+            sources::connection_remove,
+            sources::remote_search,
+            sources::remote_home,
+            sources::remote_open,
+            sources::remote_songs,
+            sources::remote_stream,
             assistant::assistant_history,
             assistant::assistant_clear,
             assistant::assistant_send,

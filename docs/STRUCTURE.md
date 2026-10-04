@@ -17,7 +17,9 @@ lute-and-tavern/
 │           ├── audio.rs       WAV to FLAC for stems, verified sample by sample
 │           ├── mcp.rs         MCP songwriting tools (JSON-RPC, transport-free)
 │           ├── control.rs     MCP full-control tools: search, playlists, tags, playback
-│           └── assistant.rs   in-app assistant (tool-calling chat, history) and the Whisper voice hook
+│           ├── assistant.rs   in-app assistant (tool-calling chat, history) and the Whisper voice hook
+│           ├── radio.rs       internet radio via Radio Browser; saved and recent stations
+│           └── remote.rs      connections to the person's own music servers (Subsonic API)
 ├── apps/
 │   └── desktop/               THE DESKTOP FACE (Tauri 2). macOS first, then Linux and Windows.
 │       ├── index.html
@@ -29,7 +31,7 @@ lute-and-tavern/
 │       │   ├── music/         notation drawing and MusicXML
 │       │   └── ui/            library grid and sidebar, song popup, sheet editor, settings
 │       └── src-tauri/         Rust side of the app: commands, lt:// file protocol, folder watcher,
-│                              local MCP server, assistant and luteandtavern:// links
+│                              local MCP server, assistant and luteandtavern:// links, stream relay
 ├── scripts/
 │   ├── dev-mac.sh             runs one live development copy on the Mac
 │   └── build-mac.sh           builds and signs the macOS app (run on the Mac)

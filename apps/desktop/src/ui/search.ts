@@ -1,17 +1,30 @@
 // The main search bar's source picker. "My music" filters the library as you type (ui/library.ts); other
-// services show a results dropdown: Enter or a click opens that service's page, the play button plays right
-// away and leaves you where you are.
+// sources (Apple Music, Radio, the person's own servers) show a results dropdown: Enter or a click opens that
+// source's page, the play button plays right away and leaves you where you are.
 import { errText } from '../api';
 import { appleStatus, searchApple, type AppleItem } from '../apple';
 import { playAppleItem, showAppleItem, showAppleSearch } from './apple';
+import { connections, dropResults, onConnectionsChange, openSourceSearch, type DropItem } from './sources';
 import { rerender, saveSetting, state } from '../state';
 import { $, esc, PLAY } from '../util';
 
-type Source = 'library' | 'apple';
-const PLACEHOLDER: Record<Source, string> = {
-  library: 'Search songs, artists, albums, lyrics',
-  apple: 'Search Apple Music: songs, albums, artists, playlists',
-};
+/** 'library', 'apple', 'radio' or 'conn:<id>' for a connected server. */
+type Source = string;
+const placeholder = (s: Source) =>
+  s === 'library' ? 'Search songs, artists, albums, lyrics'
+  : s === 'apple' ? 'Search Apple Music: songs, albums, artists, playlists'
+  : s === 'radio' ? 'Search radio stations: name, city, genre'
+  : `Search ${connections.find((c) => `conn:${c.id}` === s)?.name ?? 'your server'}`;
+let drops: DropItem[] = [];
+
+function fillSources() {
+  const sel = $<HTMLSelectElement>('#qSource');
+  const keep = sel.value || (state.settings.searchSource as string) || 'library';
+  sel.innerHTML = [['library', 'My music'], ['apple', 'Apple Music'], ['radio', 'Radio'], ...connections.map((c) => [`conn:${c.id}`, c.name])]
+    .map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('');
+  sel.value = [...sel.options].some((o) => o.value === keep) ? keep : 'library';
+  input().placeholder = placeholder(sel.value);
+}
 
 let timer = 0;
 let seq = 0;
@@ -34,7 +47,33 @@ function row(it: AppleItem, i: number) {
     <button class="play" data-qplay="${i}" aria-label="Play ${esc(it.name)}" title="Play">${PLAY}</button></div>`;
 }
 
+async function lookUpOther(q: string) {
+  const mine = ++seq;
+  const d = drop();
+  d.hidden = false;
+  d.innerHTML = '<p class="muted small">Searching…</p>';
+  try {
+    const groups = await dropResults(source(), q);
+    if (mine !== seq) return;
+    drops = groups.flatMap((g) => g.items);
+    let i = 0;
+    d.innerHTML =
+      groups.filter((g) => g.items.length).map((g) => `<h4>${esc(g.title)}</h4>` + g.items.map((it) => dropRow(it, i++)).join('')).join('') +
+      (drops.length ? `<button class="more" data-qmore>See all results for "${esc(q)}"</button>` : `<p class="muted small">Nothing matches "${esc(q)}".</p>`);
+  } catch (e) {
+    if (mine === seq) d.innerHTML = `<p class="muted small">Could not search: ${esc(errText(e))}</p>`;
+  }
+}
+
+function dropRow(it: DropItem, i: number) {
+  return `<div class="qr" role="option" data-d="${i}">
+    ${it.art ? `<img src="${esc(it.art)}" alt="">` : '<span class="ph"></span>'}
+    <div class="tx"><b>${esc(it.name)}</b><span>${esc(it.sub)}</span></div>
+    <button class="play" data-dplay="${i}" aria-label="Play ${esc(it.name)}" title="Play">${PLAY}</button></div>`;
+}
+
 async function lookUp(q: string) {
+  if (source() !== 'apple') return lookUpOther(q);
   const mine = ++seq;
   const d = drop();
   d.hidden = false;
@@ -63,16 +102,17 @@ function openResults() {
   const q = input().value.trim();
   if (!q) return;
   close();
-  showAppleSearch(q);
+  if (source() === 'apple') showAppleSearch(q);
+  else openSourceSearch(source(), q);
 }
 
 export function initSearch() {
   const sel = $<HTMLSelectElement>('#qSource');
-  sel.value = (state.settings.searchSource as Source) || 'library';
-  input().placeholder = PLACEHOLDER[source()];
+  fillSources();
+  onConnectionsChange(fillSources);
   sel.onchange = () => {
     void saveSetting('searchSource', sel.value);
-    input().placeholder = PLACEHOLDER[source()];
+    input().placeholder = placeholder(source());
     close();
     // Leaving "My music": stop filtering the library by what was typed.
     if (source() !== 'library' && state.query) {
@@ -105,6 +145,18 @@ export function initSearch() {
   });
   drop().addEventListener('click', (e) => {
     const t = e.target as HTMLElement;
+    const dp = t.closest<HTMLElement>('[data-dplay]');
+    if (dp) {
+      e.stopPropagation();
+      drops[Number(dp.dataset.dplay)]?.play();
+      return;
+    }
+    const dr = t.closest<HTMLElement>('[data-d]');
+    if (dr) {
+      close();
+      drops[Number(dr.dataset.d)]?.open();
+      return;
+    }
     const play = t.closest<HTMLElement>('[data-qplay]');
     if (play) {
       e.stopPropagation();

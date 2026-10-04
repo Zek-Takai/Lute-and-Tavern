@@ -7,6 +7,7 @@ import { $, esc, hueOf, PLAY, toast } from '../util';
 import { artUrl } from '../apple';
 import { appleHead, applePanel, handleApplePanelClick, renderAppleGrid } from './apple';
 import { openSong } from './song';
+import { handleSourcePanelClick, radioHead, radioPanel, remoteHead, renderRadioGrid, renderRemoteGrid, serversPanel } from './sources';
 
 /** Stages of a written song, for filters; songs with audio are just songs, so only the first two get a label on cards. */
 export const STATUS: Record<string, [string, string]> = {
@@ -28,16 +29,18 @@ const ICONS: Record<SideTab | 'settings', string> = {
   playlists: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h12M3 12h12M3 18h8"/><path d="M17 18V8l4-1"/><circle cx="15" cy="18" r="2"/></svg>',
   genres: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>',
   apple: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9a8 8 0 0 1 16 0"/><path d="M7.5 11a4.5 4.5 0 0 1 9 0"/><path d="M11 21v-7l4-1"/><circle cx="9" cy="21" r="2"/></svg>',
+  radio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M7 8 17 3"/><circle cx="15.5" cy="14" r="2.5"/><path d="M6.5 12.5h4M6.5 15.5h4"/></svg>',
+  servers: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>',
   settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
 };
-const TAB_NAME: Record<SideTab, string> = { library: 'Library', albums: 'Albums', playlists: 'Playlists', genres: 'Genres', apple: 'Apple Music' };
+const TAB_NAME: Record<SideTab, string> = { library: 'Library', albums: 'Albums', playlists: 'Playlists', genres: 'Genres', apple: 'Apple Music', radio: 'Radio', servers: 'Your servers' };
 let panelOpen = true;
 let panelLoaded = false;
 let sideQuery = '';
 
 /** The icon rail (Library, Playlists, Genres, Settings) and the searchable panel beside it. */
 export function renderSide() {
-  const tabs: SideTab[] = ['library', 'albums', 'playlists', 'genres', 'apple'];
+  const tabs: SideTab[] = ['library', 'albums', 'playlists', 'genres', 'apple', 'radio', 'servers'];
   $('#rail').innerHTML =
     tabs.map((k) => `<button class="rail-btn" data-st="${k}" aria-pressed="${panelOpen && state.sideTab === k}" title="${TAB_NAME[k]}" aria-label="${TAB_NAME[k]}">${ICONS[k]}</button>`).join('') +
     `<span class="rail-gap"></span><button class="rail-btn" id="openSet" title="Settings" aria-label="Settings">${ICONS.settings}</button>`;
@@ -77,6 +80,13 @@ export function renderSide() {
       if (state.sideTab === 'apple' && document.getElementById('sideList')) $('#sideList').innerHTML = html;
     });
   }
+  if (state.sideTab === 'radio') {
+    rows = '<p class="muted small side-empty">Loading…</p>';
+    void radioPanel().then((html) => {
+      if (state.sideTab === 'radio' && document.getElementById('sideList')) $('#sideList').innerHTML = html;
+    });
+  }
+  if (state.sideTab === 'servers') rows = serversPanel();
   const add = state.sideTab === 'playlists' ? '<button class="linkbtn" id="plNew">+ New</button>' : '';
   $('#side').innerHTML = `<header class="side-head"><h2>${TAB_NAME[state.sideTab]}</h2>${add}</header>
     <input class="inline-input side-find" id="sideFind" type="search" placeholder="Find ${TAB_NAME[state.sideTab].toLowerCase()}…" value="${esc(sideQuery)}" aria-label="Find in ${TAB_NAME[state.sideTab]}">
@@ -98,6 +108,10 @@ export function renderHead() {
     $('#viewHead').innerHTML = appleHead();
     return;
   }
+  if (state.view.kind === 'radio' || state.view.kind === 'remote') {
+    $('#viewHead').innerHTML = state.view.kind === 'radio' ? radioHead() : remoteHead();
+    return;
+  }
   const list = visible(), v = state.view;
   const p = v.kind === 'pl' ? state.playlists.find((x) => x.id === v.id) : undefined;
   const al = v.kind === 'album' ? albums().find((a) => a.key === v.key) : undefined;
@@ -114,7 +128,7 @@ export function renderHead() {
 export function renderChips() {
   const chips = $('#chips');
   chips.hidden = state.view.kind !== 'ai';
-  $('.bar').hidden = state.view.kind === 'apple';
+  $('.bar').hidden = ['apple', 'radio', 'remote'].includes(state.view.kind);
   if (chips.hidden) return;
   const pool = state.songs.filter((s) => s.source === 'ai');
   const counts: Record<string, number> = { all: pool.length };
@@ -142,6 +156,8 @@ function cover(s: Song) {
 
 export function renderGrid() {
   if (state.view.kind === 'apple') return void renderAppleGrid();
+  if (state.view.kind === 'radio') return void renderRadioGrid();
+  if (state.view.kind === 'remote') return void renderRemoteGrid();
   const list = visible(), q = state.query.trim();
   const empty = !state.songs.length
     ? state.folders.some((f) => f.managed)
@@ -199,6 +215,7 @@ export function initLibrary(actions: { addFolder: () => void; request: () => voi
   $('#side').onclick = async (e) => {
     const t = e.target as HTMLElement;
     if (state.sideTab === 'apple' && (await handleApplePanelClick(t, actions.settings))) return;
+    if ((state.sideTab === 'radio' || state.sideTab === 'servers') && handleSourcePanelClick(t)) return;
     if (t.id === 'plNew') {
       try {
         const n = state.playlists.length + 1;

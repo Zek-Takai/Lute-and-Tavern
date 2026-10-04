@@ -1,8 +1,8 @@
 // App state: the library snapshot from Rust plus what the person is looking at.
 import { api, type Snapshot, type Song, type WriterSettings } from './api';
 
-export type View = { kind: 'all' | 'ai' | 'library' } | { kind: 'pl'; id: number } | { kind: 'album'; key: string } | { kind: 'apple' };
-export type SideTab = 'library' | 'albums' | 'playlists' | 'genres' | 'apple';
+export type View = { kind: 'all' | 'ai' | 'library' } | { kind: 'pl'; id: number } | { kind: 'album'; key: string } | { kind: 'apple' } | { kind: 'radio' } | { kind: 'remote'; id: number };
+export type SideTab = 'library' | 'albums' | 'playlists' | 'genres' | 'apple' | 'radio' | 'servers';
 export type Repeat = 'off' | 'all' | 'one';
 
 export const state = {
@@ -78,11 +78,13 @@ export function albums() {
   return [...map.values()].sort((a, b) => Number(b.key === SINGLES) - Number(a.key === SINGLES) || a.name.localeCompare(b.name) || a.artist.localeCompare(b.artist));
 }
 
-export const playable = (s: Song) => s.provider === 'apple' || s.hasAudio || s.notes.length > 0;
+/** Songs from radio and connected servers stream, so they always count as playable. */
+export const STREAMED = ['apple', 'radio', 'remote'];
+export const playable = (s: Song) => STREAMED.includes(s.provider ?? '') || s.hasAudio || s.notes.length > 0;
 
 function inView(s: Song) {
   const v = state.view;
-  if (v.kind === 'apple') return false;
+  if (v.kind === 'apple' || v.kind === 'radio' || v.kind === 'remote') return false;
   if (v.kind === 'ai') return s.source === 'ai';
   if (v.kind === 'library') return s.source === 'library' && s.provider === 'local';
   if (s.provider === 'apple' && state.settings.showAppleInLibrary === false && v.kind !== 'pl') return false;
@@ -123,6 +125,8 @@ export function viewName() {
   if (v.kind === 'pl') return state.playlists.find((p) => p.id === v.id)?.name ?? 'Playlist';
   if (v.kind === 'album') return albums().find((a) => a.key === v.key)?.name ?? 'Album';
   if (v.kind === 'apple') return 'Apple Music';
+  if (v.kind === 'radio') return 'Radio';
+  if (v.kind === 'remote') return 'Your server';
   const base = { all: 'All music', ai: `Written with ${writerName()}`, library: 'My music' }[v.kind];
   const g = state.genre === 'all' ? '' : genresInUse().find(([k]) => k === state.genre)?.[1].name;
   return g ? `${base}, ${g}` : base;

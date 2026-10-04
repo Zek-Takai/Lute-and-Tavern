@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-remote-stream"
+description = "Enables the remote_stream command without any pre-configured scope."
+commands.allow = ["remote_stream"]
+
+[[permission]]
+identifier = "deny-remote-stream"
+description = "Denies the remote_stream command without any pre-configured scope."
+commands.deny = ["remote_stream"]
