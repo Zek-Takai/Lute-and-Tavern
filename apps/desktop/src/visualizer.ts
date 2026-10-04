@@ -1,6 +1,6 @@
 // Background visualizer: three layers of glowing silk and drifting motes that follow the music and breathe
 // slowly when nothing plays. Chosen design, see docs/DESIGN.md. What drives it (audiofeatures.ts):
-//   kick drum   a ring of light rolls out from the center      snare   points along the silk grow
+//   kick drum   a ring of light rolls out from the center (beats never move or flash the whole screen)
 //   hi-hats     the surface shimmers and motes sparkle          bass    the center swells
 //   voice       a ribbon rises along the middle layer and takes the color of the singer's pitch
 //   section     quiet verses lie low and slow; a big chorus lifts everything, speeds it up, brings the camera in
@@ -65,7 +65,7 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
           vec3 sing=pal(uPitch*.75+.05);
           vCol=mix(base,sing,clamp(voice*.55,0.,.8))*(.25+.7*smoothstep(-3.,3.,h)+uIntensity*.55+ring*.5);
           vA=smoothstep(40.,24.,abs(position.x))*smoothstep(25.,12.,abs(position.z))*(.4+uIntensity*.6)*(aLayer==1.?1.:.65);
-          gl_PointSize=clamp((1.3+max(h,0.)*.35+uAir*1.6+uHat*1.4+uSnare*1.2+voice*.8)*(260./-mv.z)*uPR,1.,14.);
+          gl_PointSize=clamp((1.3+max(h,0.)*.35+uAir*1.6+uHat*1.4+voice*.8)*(260./-mv.z)*uPR,1.,14.);
         }`,
         fragmentShader: `varying vec3 vCol;varying float vA;void main(){float d=length(gl_PointCoord-.5);gl_FragColor=vec4(vCol,smoothstep(.5,.05,d)*vA);}`,
       }),
