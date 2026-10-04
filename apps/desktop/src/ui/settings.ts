@@ -5,6 +5,8 @@ import { api, errText, type McpInfo, type PlexServer, type SpeechSettings, type 
 import { comboOf, DEFAULT_KEYS, keyLabel } from './assistant';
 import { connections, loadConnections, syncStatus } from './sources';
 import { crossfade, setCrossfade, applyLineColor, applySkin, LINE_COLORS, SKINS } from '../player';
+import { applyVisualizer, VISUALIZERS } from '../visualizer';
+import { setFadeMode } from './fade';
 import { applePullText, runApplePull } from './apple';
 import { appleStatus, connectApple, disconnectApple, forgetAppleKey, isConnected, musicKit, setAppleKey, type AppleStatus } from '../apple';
 import { libraryFolder, reload, rerender, saveSetting, state } from '../state';
@@ -161,7 +163,7 @@ export async function openSettings(section?: 'writer' | 'servers') {
 }
 
 /** Settings tabs, in order. */
-const TABS = [['general', 'General'], ['library', 'Library'], ['services', 'Music services'], ['sync', 'Sync & backup'], ['ai', 'AI']] as const;
+const TABS = [['general', 'General'], ['visual', 'Visualizer'], ['library', 'Library'], ['services', 'Music services'], ['sync', 'Sync & backup'], ['ai', 'AI']] as const;
 type Tab = (typeof TABS)[number][0];
 let tab: Tab = 'general';
 
@@ -184,6 +186,7 @@ function showTab(t: Tab, focus = false) {
 
 function render() {
   const w = state.writer;
+  const vizChoice = (state.settings.visualizer as string) || 'silk';
   const side = (state.settings.sidebarDefault as string) || 'library';
   $('#setBody').innerHTML = `
     <div class="set-top"><div class="row"><h2 id="setTitle">Settings</h2><button class="btn" id="setClose">Done</button></div>
@@ -350,6 +353,23 @@ function render() {
       <div class="row"><button class="btn primary" id="cAdd">Connect</button><span class="muted small" id="cStatus"></span></div>`}
     </section>
 
+    <section class="set-sec" data-tab="visual">
+      <h3>Visualizer</h3>
+      <p class="muted small">The moving picture behind the app. Each kind of sound keeps its own color in every one: kick drum and bass ember, snare and hi-hats frost, the voice gold to rose depending on the note.</p>
+      <fieldset class="choice" id="setViz">
+        <legend>Show</legend>
+        ${VISUALIZERS.map((v) => `<label><input type="radio" name="viz" value="${v.id}" ${vizChoice === v.id ? 'checked' : ''}> <span><b>${esc(v.name)}</b><br><span class="muted small">${esc(v.about)}</span></span></label>`).join('')}
+        <label><input type="radio" name="viz" value="random" ${vizChoice === 'random' ? 'checked' : ''}> <span><b>A different one for every song</b><br><span class="muted small">Picks one of the above at random each time a new song starts.</span></span></label>
+        <label><input type="radio" name="viz" value="off" ${vizChoice === 'off' ? 'checked' : ''}> <span><b>None</b><br><span class="muted small">A plain background (uses the least power).</span></span></label>
+      </fieldset>
+      <fieldset class="choice" id="setFade">
+        <legend>While music plays</legend>
+        <label><input type="radio" name="fade" value="auto" ${state.settings.foregroundFade === 'show' ? '' : 'checked'}> Fade the library away after 10 seconds without moving the mouse, to watch the visualizer</label>
+        <label><input type="radio" name="fade" value="show" ${state.settings.foregroundFade === 'show' ? 'checked' : ''}> Always show the library</label>
+      </fieldset>
+      <p class="muted small">The eye button on the player bar switches this too, and can hide the library right away.</p>
+    </section>
+
     <section class="set-sec" data-tab="general">
       <h3>Updates</h3>
       <p class="muted small">Version ${esc(updates.currentVersion)}. ${updates.canUpdate
@@ -380,6 +400,11 @@ function render() {
     </section>`;
 
   $('#setClose').onclick = () => $<HTMLDialogElement>('#set').close();
+  document.querySelectorAll<HTMLInputElement>('input[name=viz]').forEach((r) => (r.onchange = async () => {
+    await saveSetting('visualizer', r.value);
+    applyVisualizer();
+  }));
+  document.querySelectorAll<HTMLInputElement>('input[name=fade]').forEach((r) => (r.onchange = () => setFadeMode(r.value as 'auto' | 'show')));
   $<HTMLSelectElement>('#xfade').onchange = (e) => setCrossfade(Number((e.target as HTMLSelectElement).value));
   showTab(tab);
   const tabs = $('#setBody .set-tabs');

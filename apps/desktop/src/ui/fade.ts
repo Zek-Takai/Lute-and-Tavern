@@ -52,6 +52,15 @@ function sync() {
   b.title = LABEL[mode];
 }
 
+/** Settings › Visualizer: fade when idle, or always show (the same as the eye button's first two states). */
+export function setFadeMode(m: 'auto' | 'show') {
+  mode = m;
+  void saveSetting('foregroundFade', m);
+  last = Date.now();
+  sync();
+  apply();
+}
+
 export function initFade() {
   const saved = state.settings.foregroundFade;
   mode = saved === 'show' ? 'show' : 'auto';
