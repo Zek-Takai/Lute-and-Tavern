@@ -99,6 +99,15 @@ export async function openSettings(section?: 'writer' | 'servers') {
   if (apple.ready) await musicKit().catch(() => {});
   render();
   const d = $<HTMLDialogElement>('#set');
+  // A click on the dimmed area outside the box closes Settings.
+  if (!d.dataset.outsideClose) {
+    d.dataset.outsideClose = '1';
+    d.addEventListener('mousedown', (e) => {
+      if (e.target !== d) return;
+      const r = d.getBoundingClientRect();
+      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) d.close();
+    });
+  }
   if (!d.open) d.showModal();
   if (section === 'writer') $('#wUrl')?.focus();
   if (section === 'servers') {
@@ -111,7 +120,7 @@ function render() {
   const w = state.writer;
   const side = (state.settings.sidebarDefault as string) || 'library';
   $('#setBody').innerHTML = `
-    <div class="row" style="justify-content:space-between"><h2 id="setTitle">Settings</h2><button class="btn" id="setClose">Done</button></div>
+    <div class="row set-top"><h2 id="setTitle">Settings</h2><button class="btn" id="setClose">Done</button></div>
 
     <section class="set-sec">
       <h3>Your AI</h3>

@@ -157,3 +157,6 @@ nav.rail { position: sticky; top: 16px; display: flex; flex-direction: column; a
 .card .fav{min-width:34px;justify-content:center;padding:4px 8px}
 .card .fav[aria-pressed="true"]{color:#e76f8a}
 .tag-row{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px}
+
+/* Settings: the title bar and Done stay in view while the settings scroll */
+.settings .set-top{position:sticky;top:-22px;z-index:3;justify-content:space-between;margin:-22px -24px 0;padding:22px 24px 12px;background:var(--surface);border-bottom:1px solid var(--line)}
