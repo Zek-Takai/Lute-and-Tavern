@@ -1,6 +1,7 @@
 // Background visualizer: three layers of glowing silk and drifting motes that follow the music and breathe
 // slowly when nothing plays. Chosen design, see docs/DESIGN.md. What drives it (audiofeatures.ts):
-//   kick drum   a ring of light rolls out from the center (beats never move or flash the whole screen)
+//   the river   the last ~5 seconds of music (beats, bass, loudness) travel across the silk as one current, so
+//               what you heard a moment ago is still flowing downstream (beats never move or flash the screen)
 //   hi-hats     the surface shimmers and motes sparkle          bass    the center swells
 //   voice       a ribbon rises along the middle layer and takes the color of the singer's pitch
 //   section     quiet verses lie low and slow; a big chorus lifts everything, speeds it up, brings the camera in
@@ -22,11 +23,20 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
   renderer.setClearColor(0x0b0d24, 1);
   const scene = new THREE.Scene();
   const cam = new THREE.PerspectiveCamera(55, 1, 0.1, 200);
+  const FLOW = 96, FLOW_RATE = 20; // samples, samples per second: ~4.8 s of music across the scene
   const U = {
     uTime: { value: 0 }, uBass: { value: 0 }, uBody: { value: 0 }, uAir: { value: 0 }, uIntensity: { value: 0.3 }, uRise: { value: 0 },
-    uKickAge: { value: 9 }, uKickAmp: { value: 0 }, uSnare: { value: 0 }, uHat: { value: 0 }, uVocal: { value: 0 }, uPitch: { value: 0.5 }, uPR: { value: DPR },
+    uFlow: { value: Array.from({ length: FLOW / 4 }, () => new THREE.Vector4()) },
+    uVoice: { value: Array.from({ length: FLOW / 4 }, () => new THREE.Vector4()) },
+    uPhase: { value: 0 }, uSnare: { value: 0 }, uHat: { value: 0 }, uVocal: { value: 0 }, uPitch: { value: 0.5 }, uPR: { value: DPR },
   };
   const PAL = 'vec3 pal(float t){return .55+.45*cos(6.2831*(t+vec3(.0,.2,.42)));}';
+  // The river: FLOW samples of the music, newest first, packed four to a vec4. Read with smooth
+  // interpolation and a moving phase, so the current glides instead of stepping.
+  const RIVER = `uniform vec4 uFlow[${FLOW / 4}],uVoice[${FLOW / 4}];uniform float uPhase;
+    float pick(vec4 v,int j){return j==0?v.x:j==1?v.y:j==2?v.z:v.w;}
+    float at(bool voice,float i){int k=int(clamp(i,0.,${FLOW - 1}.));vec4 v=voice?uVoice[k/4]:uFlow[k/4];return pick(v,k-(k/4)*4);}
+    float river(bool voice,float x01){float i=x01*${FLOW - 2}.+uPhase;float a=at(voice,floor(i)),b=at(voice,floor(i)+1.);float f=fract(i);return mix(a,b,f*f*(3.-2.*f));}`;
 
   const NX = 220, NZ = 130, L = 3, N = NX * NZ * L;
   const pos = new Float32Array(N * 3), lay = new Float32Array(N);
@@ -47,17 +57,17 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
       g,
       new THREE.ShaderMaterial({
         uniforms: U, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-        vertexShader: `uniform float uTime,uBass,uBody,uAir,uIntensity,uRise,uKickAge,uKickAmp,uSnare,uHat,uVocal,uPitch,uPR;attribute float aLayer;varying vec3 vCol;varying float vA;${PAL}
+        vertexShader: `uniform float uTime,uBass,uBody,uAir,uIntensity,uRise,uSnare,uHat,uVocal,uPitch,uPR;attribute float aLayer;varying vec3 vCol;varying float vA;${PAL}${RIVER}
         void main(){
           vec3 p=position;float t=uTime,ph=aLayer*2.1,r=length(p.xz);
           float h=sin(p.x*.16+t*.35+ph)*1.6+sin(p.z*.23-t*.28+ph*.7)*1.1+sin((p.x-p.z)*.09+t*.2)*1.8;
           h*=.35+uIntensity*1.15+uRise*.5+uBody*.25;
-          h+=sin(r*.55-t*2.6)*uBass*2.4*exp(-r*.035);
-          float rd=(r-uKickAge*34.)*.33;
-          float ring=exp(-rd*rd)*uKickAmp*exp(-uKickAge*2.2);
-          h+=ring*3.;
+          // the current: music flows downstream along x, strongest in the middle of the stream
+          float x01=clamp((p.x+40.)/80.,0.,1.);
+          float ring=river(false,x01)*exp(-p.z*p.z*.0035)*(1.-x01*.35);
+          h+=ring*3.4*(.85+.15*sin(p.z*.35+t*.6+aLayer));
           h+=sin(p.x*.9+t*3.1)*sin(p.z*.8-t*2.4)*(uAir*.6+uHat*.9);
-          float voice=aLayer==1.?uVocal*exp(-abs(p.z)*.09)*(1.4+sin(p.x*.14-t*1.1)*1.1):0.;
+          float voice=aLayer==1.?river(true,x01)*exp(-abs(p.z)*.09)*(1.3+sin(p.x*.14-t*.8)*.7):0.;
           h+=voice*2.2;
           p.y=h+(aLayer-1.)*3.4-2.;
           vec4 mv=modelViewMatrix*vec4(p,1.);gl_Position=projectionMatrix*mv;
@@ -110,7 +120,9 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
   addEventListener('resize', size);
   size();
 
-  let t = 0, last = performance.now(), kickAge = 9, kickAmp = 0, lastKick = 0, listenFailed = false, camDist = 24;
+  let t = 0, last = performance.now(), listenFailed = false, camDist = 24, speed = 0.6;
+  let flowIn = 0, voiceIn = 0, flowPhase = 0;
+  const flowBuf = new Float32Array(FLOW), voiceBuf = new Float32Array(FLOW);
   const frame = (now: number) => {
     requestAnimationFrame(frame);
     if (document.hidden) {
@@ -127,22 +139,33 @@ export function startVisualizer(canvas: HTMLCanvasElement) {
       listenFailed = true;
     }
     const f = features;
-    // a new kick starts a new ring
-    if (f.kick > lastKick + 0.5) {
-      kickAge = 0;
-      kickAmp = 0.5 + f.bass * 0.5;
+    // what enters the river now: beats and bass as swells, carried on the general loudness
+    const inFlow = Math.min(1.4, f.level * 0.45 + f.kick * 0.55 + f.bass * 0.35 + f.snare * 0.2);
+    flowIn += (inFlow - flowIn) * Math.min(1, dt * (inFlow > flowIn ? 14 : 5));
+    voiceIn += (f.vocal - voiceIn) * Math.min(1, dt * 5);
+    flowPhase += dt * FLOW_RATE;
+    while (flowPhase >= 1) {
+      flowPhase -= 1;
+      flowBuf.copyWithin(1, 0);
+      voiceBuf.copyWithin(1, 0);
+      flowBuf[0] = calm ? flowIn * 0.4 : flowIn;
+      voiceBuf[0] = voiceIn;
     }
-    lastKick = f.kick;
-    kickAge += dt;
-    t += dt * (calm ? 0.25 : 1) * (0.55 + f.intensity * 1.1 + f.body * 0.3);
+    for (let i = 0; i < FLOW / 4; i++) {
+      U.uFlow.value[i].set(flowBuf[i * 4], flowBuf[i * 4 + 1], flowBuf[i * 4 + 2], flowBuf[i * 4 + 3]);
+      U.uVoice.value[i].set(voiceBuf[i * 4], voiceBuf[i * 4 + 1], voiceBuf[i * 4 + 2], voiceBuf[i * 4 + 3]);
+    }
+    // the newest sample sits at the upstream edge; the phase moves everything smoothly between samples
+    U.uPhase.value = -flowPhase;
+    // speed follows the section, eased over seconds so it never lurches
+    speed += ((0.55 + f.intensity * 0.9 + f.body * 0.2) - speed) * Math.min(1, dt * 0.5);
+    t += dt * (calm ? 0.25 : 1) * speed;
     U.uTime.value = t;
     U.uBass.value = f.bass;
     U.uBody.value = f.body;
     U.uAir.value = f.air;
     U.uIntensity.value = f.intensity;
     U.uRise.value = f.rise;
-    U.uKickAge.value = calm ? 9 : kickAge;
-    U.uKickAmp.value = kickAmp;
     U.uSnare.value = calm ? f.snare * 0.3 : f.snare;
     U.uHat.value = f.hat;
     U.uVocal.value = f.vocal;
