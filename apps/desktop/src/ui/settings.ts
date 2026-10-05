@@ -313,6 +313,16 @@ function render() {
       <div id="syReport"></div>
     </section>
 
+    <section class="set-sec" data-tab="sync" id="setShows">
+      <h3>Song IDs and visualizer shows</h3>
+      <p class="muted small">Songs on your music server get their song IDs and visualizer shows from the <code>Shows</code> folder on a file connection (WebDAV, e.g. Nextcloud Files). Made once for the whole library with the show analyzer; songs without a show use live listening.</p>
+      <div class="form">
+        <label for="shConn">From</label><select id="shConn"><option value="">Automatic (the backup connection, or your first file connection)</option>${connections.filter((c) => c.kind === 'webdav').map((c) => `<option value="${c.id}" ${state.settings.showsConn === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
+        <label for="shFolder">Folder there</label><input id="shFolder" value="${esc((state.settings.showsFolder as string) || '')}" placeholder="${esc(backupCfg.folder || 'Music/Lute & Tavern')} (the one holding Shows)">
+      </div>
+      <div class="row"><button class="btn" id="shNow">Get song IDs now</button><span class="muted small" id="shStatus"></span></div>
+    </section>
+
     <section class="set-sec" data-tab="sync" id="setBackup">
       <h3>Backup</h3>
       <p class="muted small">Copies your library folder to a server in the same layout, so new songs land in their place there. Only new, changed and moved files are sent; nothing on the server is ever deleted. It goes to a <b>WebDAV</b> connection (add one under Your music servers). For Nextcloud that's its Files address, <code>https://your-nextcloud/remote.php/dav/files/your-name</code>, which works alongside its Music server connection.</p>
@@ -716,6 +726,25 @@ function render() {
       st.textContent = errText(e);
     }
   });
+  $<HTMLSelectElement>('#shConn').onchange = async (e) => {
+    const v = (e.target as HTMLSelectElement).value;
+    await saveSetting('showsConn', v ? Number(v) : null);
+  };
+  $<HTMLInputElement>('#shFolder').onchange = async (e) => {
+    await saveSetting('showsFolder', (e.target as HTMLInputElement).value.trim().replace(/^\/+|\/+$/g, '') || null);
+  };
+  $('#shNow').onclick = async () => {
+    const st = $('#shStatus');
+    st.textContent = 'Getting song IDs…';
+    try {
+      const n = await api.refreshSongIds();
+      await reload();
+      rerender();
+      st.textContent = n ? `${n} server song${n === 1 ? '' : 's'} got their song ID.` : 'Every server song that is in the list already has its ID.';
+    } catch (e) {
+      st.textContent = errText(e);
+    }
+  };
   document.getElementById('bNow')?.addEventListener('click', async () => {
     try {
       await api.backupNow();

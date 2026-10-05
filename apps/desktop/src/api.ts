@@ -147,6 +147,7 @@ export const api = {
   backupSettings: () => invoke<BackupSettings>('backup_settings'),
   setBackupSettings: (conn: number | null, folder: string, schedule: BackupSchedule) => invoke<BackupSettings>('set_backup_settings', { conn, folder, schedule }),
   backupNow: () => invoke<void>('backup_now'),
+  refreshSongIds: () => invoke<number>('refresh_song_ids'),
   syncPlaylists: () => invoke<{ ran: boolean; last: PlaylistSyncLast | null }>('sync_playlists'),
   importPlaylists: (files: string[]) => invoke<ImportedPlaylist[]>('import_playlists', { files }),
   syncSettings: () => invoke<SyncSettings>('sync_settings'),

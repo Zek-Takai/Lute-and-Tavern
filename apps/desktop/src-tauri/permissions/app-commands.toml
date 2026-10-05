@@ -55,6 +55,7 @@ commands.allow = [
   "save_external_song",
   "set_song_written",
   "song_show",
+  "refresh_song_ids",
   "reveal_song",
   "pull_apple_library",
   "add_apple_to_playlist",

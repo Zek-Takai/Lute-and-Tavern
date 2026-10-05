@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-refresh-song-ids"
+description = "Enables the refresh_song_ids command without any pre-configured scope."
+commands.allow = ["refresh_song_ids"]
+
+[[permission]]
+identifier = "deny-refresh-song-ids"
+description = "Denies the refresh_song_ids command without any pre-configured scope."
+commands.deny = ["refresh_song_ids"]

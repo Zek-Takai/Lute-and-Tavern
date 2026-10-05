@@ -234,20 +234,6 @@ static SYNCING: Mutex<Vec<i64>> = Mutex::new(Vec::new());
 /// 3 = file paths for song IDs).
 const SYNC_FORMAT: i64 = 3;
 
-/// Server songs get their song IDs from the server's song ID list, kept in the Shows folder inside the backup
-/// folder (made by lt-songid --index over the server's music). No backup connection or no list yet: nothing
-/// to do; the songs get their IDs on a later sync.
-fn map_song_ids(lib: &lt_core::Library) -> anyhow::Result<usize> {
-    let Some(conn_id) = lib.settings()?.get("backupConn").and_then(serde_json::Value::as_i64) else { return Ok(0) };
-    let folder = lib.setting_str("backupFolder").unwrap_or_else(|| "Music/Lute & Tavern".into());
-    let conn = lib.connection(conn_id)?;
-    let secret = keyring::Entry::new("Lute & Tavern", &format!("connection-{conn_id}"))?.get_password()?;
-    let dav = lt_core::remote_webdav::WebDav::new(&conn, &secret);
-    let mut parts: Vec<&str> = folder.split('/').map(str::trim).filter(|p| !p.is_empty()).collect();
-    parts.extend(["Shows", "song-ids.tsv"]);
-    let Some(bytes) = dav.get_bytes(&dav.url_for(&parts, false))? else { return Ok(0) };
-    lib.map_remote_uids(&String::from_utf8_lossy(&bytes))
-}
 
 /// Starts a background sync of a server into My music (one at a time per server). `force` re-reads even when
 /// the server says nothing changed (the Refresh button).
@@ -267,7 +253,7 @@ pub fn start_library_sync(app: &AppHandle, id: i64, force: bool) {
         };
         let result = sync_library(&state.lib, id, force, &|m| send("running", m));
         if result.is_ok() {
-            match map_song_ids(&state.lib) {
+            match crate::shows::map_song_ids(&state.lib) {
                 Ok(n) if n > 0 => crate::emit_library_changed(&app),
                 Ok(_) => {}
                 Err(e) => crate::log::write("warn", &format!("server song IDs: {e:#}")),

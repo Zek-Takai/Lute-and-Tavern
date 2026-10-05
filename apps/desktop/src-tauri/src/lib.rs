@@ -583,6 +583,7 @@ pub fn run() {
             save_external_song,
             set_song_written,
             shows::song_show,
+            shows::refresh_song_ids,
             reveal_song,
             pull_apple_library,
             add_apple_to_playlist,
