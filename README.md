@@ -69,6 +69,8 @@ Version 0.1: library, folders, playlists, queue, genre tags, songwriter, sheet e
 
 Free for personal use: listening, hobby and amateur music-making, study, and testing. Charities, schools, public research groups and government bodies may use it free too. Businesses and corporations may not use it, in whole or in part, without the author's permission.
 
-Lute & Tavern is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE.md). For commercial use, contact the author through GitHub.
+Lute & Tavern is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE.md).
+
+**Businesses:** commercial licenses and code purchases are available. Contact the author through GitHub.
 
 The optional show analyzer installs open-source tools from their makers under their own licenses (see Settings › Shows › Made with).
