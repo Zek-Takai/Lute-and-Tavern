@@ -18,6 +18,20 @@ Sign-ins, keys and tokens are kept in your system's key store (macOS Keychain, W
 
 Installers for macOS (Apple Silicon) and Linux (.deb, .rpm, AppImage) are on the [Releases](../../releases) page.
 
+## Screenshots
+
+![The songwriter at work](docs/screenshots/lute_tavern_songwriting_interface.gif)
+
+![The living background](docs/screenshots/abstract_digital_waveform_background.gif)
+
+| | |
+|---|---|
+| ![Music library](docs/screenshots/lute_tavern_music_library_ari_songs.png) | ![Song details](docs/screenshots/music_library_stigmata_details.png) |
+| ![Songwriter](docs/screenshots/lute_tavern_songwriting_interface.png) | ![Song creation](docs/screenshots/lute_tavern_song_creation_interface.png) |
+| ![Song editor](docs/screenshots/lute_tavern_song_editor_interface.png) | ![Song details editor](docs/screenshots/lute_tavern_song_details_editor.png) |
+| ![Editing a song's details](docs/screenshots/lute_tavern_music_editor_song_details.png) | ![Library detail popover](docs/screenshots/lute_tavern_song_library_detail_popover.png) |
+| ![Song details panel](docs/screenshots/lute_tavern_song_details_screenshot.png) | |
+
 ## Layout
 
 See [docs/STRUCTURE.md](docs/STRUCTURE.md). In short: `crates/lt-core` is the engine (database, tags, folders, songwriter), `apps/desktop` is the Tauri app that puts a face on it.
