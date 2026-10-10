@@ -213,7 +213,8 @@ export function renderTab() {
     const fields: [keyof SongDetail, string][] = [['title', 'Title'], ['artist', 'Artist'], ['album', 'Album'], ['year', 'Year'], ['genre', 'Genre']];
     b.innerHTML = `<div class="details">
       <div><div class="art" style="${s.art ? `background-image:${esc(cssUrl(lt('art', s.art)))}` : ''}">${s.art ? '' : 'No artwork'}</div>
-        <div class="row"><button class="btn small" id="artSet">${s.art ? 'Change artwork' : 'Add artwork'}</button>${s.art ? '<button class="btn small" id="artClear">Remove</button>' : ''}</div></div>
+        <div class="row"><button class="btn small" id="artSet">${s.art ? 'Change artwork' : 'Add artwork'}</button>${s.art ? '<button class="btn small" id="artClear">Remove</button>' : ''}</div>
+        <p class="muted small">Choose an image, or a song file with a cover inside. From Suno? Its .m4a download has no cover: choose Suno's .mp3 of the same song and its cover is copied into this song${s.songDir ? "'s file" : ''}.</p></div>
       <div class="form">${fields
         .map(([k, l]) => `<label for="d_${k}">${l}</label><input id="d_${k}" data-k="${k}" value="${esc(s[k])}"${k === 'genre' ? ' list="genreList" placeholder="Pick a tag or type a new one"' : ''}${k === 'artist' && s.source === 'ai' ? ' readonly' : ''}>`)
         .join('')}</div>

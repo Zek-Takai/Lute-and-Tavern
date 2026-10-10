@@ -825,6 +825,39 @@ mod tests {
         );
     }
 
+    /// Suno's M4A downloads come without artwork; its MP3 of the same song has it. Choosing the MP3 as the
+    /// artwork (Song details › Add artwork) must copy its cover into the M4A in the library.
+    #[test]
+    fn cover_from_an_mp3_is_embedded_in_the_m4a() {
+        let ff = |args: &[&str]| std::process::Command::new("ffmpeg").args(["-v", "error", "-y"]).args(args).status().is_ok_and(|s| s.success());
+        let tmp = tempfile::tempdir().unwrap();
+        let (png, mp3, m4a) = (tmp.path().join("c.png"), tmp.path().join("Song.mp3"), tmp.path().join("in.m4a"));
+        let made = ff(&["-f", "lavfi", "-i", "color=c=red:s=16x16", "-frames:v", "1", png.to_str().unwrap()])
+            && ff(&["-f", "lavfi", "-i", "sine=d=1", "-i", png.to_str().unwrap(), "-map", "0", "-map", "1", "-c:v", "png",
+                    "-disposition:v", "attached_pic", "-id3v2_version", "3", mp3.to_str().unwrap()])
+            && ff(&["-f", "lavfi", "-i", "sine=d=1", "-c:a", "aac", m4a.to_str().unwrap()]);
+        if !made {
+            eprintln!("ffmpeg not available; skipping");
+            return;
+        }
+        let cover = tags::read_track(&mp3, None).picture.expect("the MP3 has a cover").0;
+        assert!(tags::read_track(&m4a, None).picture.is_none(), "the M4A starts without a cover");
+
+        let l = Library::open(&tmp.path().join("data")).unwrap();
+        let lib = tmp.path().join("Library");
+        std::fs::create_dir_all(&lib).unwrap();
+        std::fs::copy(&m4a, lib.join("Song.m4a")).unwrap();
+        let f = l.set_library_folder(&lib).unwrap();
+        l.scan_folder(&f).unwrap();
+        let song = l.songs().unwrap().into_iter().next().expect("the M4A was imported");
+
+        let song = l.set_art_from_file(song.id, &mp3).unwrap();
+        assert!(song.art.is_some(), "the song has artwork");
+        let path = l.audio_path(song.id).unwrap().unwrap();
+        assert_eq!(path.extension().unwrap(), "m4a");
+        assert_eq!(tags::read_track(&path, None).picture.map(|p| p.0), Some(cover), "the M4A now carries the MP3's cover");
+    }
+
     #[test]
     fn software_folder_is_left_alone() {
         let tmp = tempfile::tempdir().unwrap();
