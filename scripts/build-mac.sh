@@ -143,7 +143,9 @@ export LT_UPDATER_PUBKEY="$(cat "$key.pub")"
 
 # CI=true makes Tauri's disk-image step skip arranging the window through Finder (AppleScript), which needs
 # permission to control Finder and gets stuck when that isn't granted. The installer works the same.
-CI=true APPLE_SIGNING_IDENTITY="$hash" npm run tauri build -- --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":true}}'
+# The public key also goes into the build's config: Tauri checks the update signature against it after signing.
+build_config=$(LT_PUB="$LT_UPDATER_PUBKEY" node -e 'console.log(JSON.stringify({bundle: {createUpdaterArtifacts: true}, plugins: {updater: {pubkey: process.env.LT_PUB}}}))')
+CI=true APPLE_SIGNING_IDENTITY="$hash" npm run tauri build -- --bundles app,dmg --config "$build_config"
 
 app="$bundle_dir/macos/Lute & Tavern.app"
 dmg=$(ls -t "$bundle_dir"/dmg/*.dmg | head -1)
