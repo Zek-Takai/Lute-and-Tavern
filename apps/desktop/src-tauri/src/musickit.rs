@@ -19,7 +19,10 @@ fn embedded() -> Option<String> {
     if SCRAMBLED.is_empty() {
         return None;
     }
-    String::from_utf8(SCRAMBLED.iter().zip(MASK).map(|(b, m)| b ^ m).collect()).ok()
+    // black_box keeps the optimizer from unscrambling the two constants at build time, which would put the
+    // plain token back into the program.
+    let (scrambled, mask) = (std::hint::black_box(SCRAMBLED), std::hint::black_box(MASK));
+    String::from_utf8(scrambled.iter().zip(mask).map(|(b, m)| b ^ m).collect()).ok()
 }
 
 /// The person's own key, complete (key in the keychain, Key ID and Team ID in settings).
