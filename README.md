@@ -16,7 +16,7 @@ Sign-ins, keys and tokens are kept in your system's key store (macOS Keychain, W
 
 ## Download
 
-Installers for macOS (Apple Silicon) and Linux (.deb, .rpm, AppImage) are on the [Releases](../../releases) page.
+Installers for macOS (Apple Silicon) and Linux (.deb, .rpm, AppImage) are on the [Releases](../../releases) page. Windows is coming soon.
 
 ## Screenshots
 
