@@ -16,7 +16,7 @@ Sign-ins, keys and tokens are kept in your system's key store (macOS Keychain, W
 
 ## Download
 
-Installers for macOS (Apple Silicon) and Linux (.deb, .rpm, AppImage) are on the [Releases](../../releases) page. Windows is coming soon.
+Installers for macOS (Apple Silicon), Windows 10 and 11 (64-bit) and Linux (.deb, .rpm, AppImage) are on the [Releases](../../releases) page. The Windows installer isn't code-signed: if Windows shows "Windows protected your PC", choose More info, then Run anyway.
 
 ## Screenshots
 
