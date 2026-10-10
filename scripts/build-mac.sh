@@ -20,6 +20,8 @@
 #   LT_UPDATE_BASE_URL=https://downloads.example.com/lute-and-tavern scripts/build-mac.sh --release
 # Other overrides: LT_SIGN_IDENTITY (certificate name or part of it), LT_NOTARY_PROFILE (default lute-and-tavern).
 set -euo pipefail
+# Keep this Mac's folder paths (and so your user name) out of the built program.
+source "${0:A:h}/clean-paths.sh"
 cd "${0:A:h}/../apps/desktop"
 mode=${1:-local}
 [[ "$mode" == "--release" ]] && mode=release
