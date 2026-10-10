@@ -261,3 +261,4 @@ body{padding-block:0}
 .sh-tools li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; }
 .sh-tool { display: flex; flex-direction: column; gap: 4px; flex: 1 1 260px; min-width: 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.sh-note { margin: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); background: var(--accent-soft); font-size: 13px; line-height: 1.5; }

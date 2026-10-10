@@ -1030,18 +1030,19 @@ function renderShows() {
       <div class="sh-auto">
         <label class="row"><input type="checkbox" id="shAuto" ${auto ? 'checked' : ''}> Make shows automatically when songs are added</label>
         <div class="row"><button class="btn primary" id="shNowAll" ${i.without ? '' : 'disabled'}>Make shows now</button><span class="muted small">${i.without ? `For the ${i.without} song${i.without === 1 ? '' : 's'} without one. Runs in the background; keep listening while it works.` : 'Every song here has a show.'}</span></div>
-        <p class="muted small">You can also make one song's show from its panel. Shows are ready the next time a song plays.</p>
+        <p class="muted small">For one song: open the song (click it) and press <b>Make show</b> on its <b>Visualizer show</b> line, under the song's details. Shows are ready the next time a song plays.</p>
       </div>` : ''}
 
       <h3>${ready ? 'Setup (done)' : 'Set up shows (once)'}</h3>
-      <p class="muted small">Shows are made by the show analyzer, which runs on free, open-source tools from their makers (see <b>Made with</b>). Lute &amp; Tavern doesn't include or install them; the links open each maker's own page, which always has their newest version. After these three steps the app makes shows by itself.</p>
+      <p class="muted small">Shows are made by the show analyzer, which runs on free, open-source tools from their makers (see <b>Made with</b>). Lute &amp; Tavern doesn't include or install them; the links open each maker's own page, which always has their newest version. After these three steps the app makes shows by itself, and each song gets a <b>Make show</b> button: open the song and find it on the <b>Visualizer show</b> line under its details.</p>
       <ol class="sh-steps">
         ${step(1, ready, 'Install Python', `<p>Version 3.10 to 3.14. ${pyHint}</p>${links('python')}`)}
         ${step(2, i.analyzerSaved, 'Save the show analyzer', `<p>Puts its files in <code>_Software/Show analyzer</code> in your library folder.</p>
           <div class="row"><button class="btn small" id="shSave">${i.analyzerSaved ? 'Save again' : 'Save analyzer files'}</button>${i.analyzerSaved ? '<button class="btn small" id="shOpenAnalyzer">Open folder</button>' : ''}<span class="muted small" id="shSaveStatus"></span></div>`)}
         ${step(3, ready, 'Run the setup', `<p>Open ${c.shell}, paste this and press Return:</p>
           <div class="sh-cmd"><code>${esc(c.setup)}</code><button class="btn small" id="shCopySetup">Copy</button></div>
-          <p class="muted small">It gives the analyzer its own Python in <code>_Software/Show analyzer/python</code> and installs PyTorch, Demucs, librosa and FFmpeg there (a few GB; it can take a while). It ends with <b>Ready</b> and the device it will use: <code>cuda</code> (NVIDIA, or AMD on Linux), <code>mps</code> (a Mac's graphics) or <code>cpu</code> (the processor, slower).${onWindows() ? ' With an AMD card on Windows, see <b>ROCm</b> below.' : ''} Then press <b>Refresh</b> above.</p>`)}
+          <p class="muted small">It gives the analyzer its own Python in <code>_Software/Show analyzer/python</code> and installs PyTorch, Demucs, librosa and FFmpeg there (a few GB; it can take a while). It ends with <b>Ready</b> and the device it will use: <code>cuda</code> (NVIDIA, or AMD on Linux), <code>mps</code> (a Mac's graphics) or <code>cpu</code> (the processor).${onWindows() ? ' With an AMD card on Windows, see <b>ROCm</b> below.' : ''} Then press <b>Refresh</b> above.</p>
+          <p class="sh-note"><b>Using the processor (<code>cpu</code>) is slow:</b> a few minutes per song (about 3 minutes on a small home-server processor in our test), so a large library can take days. It runs in the background and picks up where it left off, but a graphics card is many times faster.</p>`)}
       </ol>
 
       <h3>Made with</h3>
