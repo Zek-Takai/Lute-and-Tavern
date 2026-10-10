@@ -134,7 +134,7 @@ if [[ -z "${LT_MUSICKIT_SKIP:-}" ]]; then
   print "Apple Music access built in until $(date -v+180d '+%B %-d, %Y') (Key ID $kid). Release again before then."
 fi
 
-base="${LT_UPDATE_BASE_URL:-}"
+base="${LT_UPDATE_BASE_URL:-https://github.com/Zek-Takai/Lute-and-Tavern/releases/latest/download}"
 base=${base%/}
 export TAURI_SIGNING_PRIVATE_KEY="$key"
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$key_password"
@@ -164,9 +164,9 @@ rm -rf "$out" && mkdir -p "$out"
 cp "$dmg" "$out/Lute-and-Tavern-$version-mac-arm64.dmg"
 cp "$tarball" "$out/Lute-and-Tavern-$version-mac-arm64.app.tar.gz"
 if [[ -n "$base" ]]; then
-  VERSION="$version" URL="$base/Lute-and-Tavern-$version-mac-arm64.app.tar.gz" SIG="$(cat "$tarball.sig")" \
-    node -e 'console.log(JSON.stringify({version: process.env.VERSION, notes: "", pub_date: new Date().toISOString(),
-      platforms: {"darwin-aarch64": {signature: process.env.SIG, url: process.env.URL}}}, null, 2))' > "$out/latest.json"
+  cp "$tarball.sig" "$out/Lute-and-Tavern-$version-mac-arm64.app.tar.gz.sig"
+  node ../../scripts/update-manifest.mjs "$out/latest.json" "$version" darwin-aarch64 \
+    "$base/Lute-and-Tavern-$version-mac-arm64.app.tar.gz" "$tarball.sig"
   print "\nRelease ready in $(cd "$out" && pwd)."
   ../../scripts/publish-update.sh "$out"
 else
