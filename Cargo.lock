@@ -2912,6 +2912,7 @@ dependencies = [
  "notify-debouncer-mini",
  "percent-encoding",
  "reqwest",
+ "ring",
  "serde",
  "serde_json",
  "tauri",

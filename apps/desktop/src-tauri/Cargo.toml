@@ -35,3 +35,7 @@ url = "2.5.8"
 
 [build-dependencies]
 tauri-build = { version = "2.7.0", features = [] }
+
+[dev-dependencies]
+ring = "0.17"
+base64 = "0.22"

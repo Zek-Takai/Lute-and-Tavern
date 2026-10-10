@@ -145,17 +145,19 @@ fn sign(pem: &str, key_id: &str, team_id: &str) -> Result<(String, u64), String>
 mod tests {
     use super::sign;
 
-    // A throwaway P-256 key made for this test only.
-    const TEST_KEY: &str = "-----BEGIN PRIVATE KEY-----
-(test key removed)
-(test key removed)
-(test key removed)
------END PRIVATE KEY-----
-";
+    /// A fresh P-256 key for each test run (PKCS#8 PEM, like Apple's .p8 files), so no key lives in the code.
+    fn test_key() -> String {
+        use base64::Engine;
+        use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
+        let der = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &ring::rand::SystemRandom::new()).unwrap();
+        let b64 = base64::engine::general_purpose::STANDARD.encode(der.as_ref());
+        let lines: Vec<&str> = b64.as_bytes().chunks(64).map(|c| std::str::from_utf8(c).unwrap()).collect();
+        format!("-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n", lines.join("\n"))
+    }
 
     #[test]
     fn signs_es256_tokens_with_key_id() {
-        let (token, exp) = sign(TEST_KEY, "ABC123DEFG", "TEAM123456").unwrap();
+        let (token, exp) = sign(&test_key(), "ABC123DEFG", "TEAM123456").unwrap();
         let header = jsonwebtoken::decode_header(&token).unwrap();
         assert_eq!(header.kid.as_deref(), Some("ABC123DEFG"));
         assert_eq!(header.alg, jsonwebtoken::Algorithm::ES256);
