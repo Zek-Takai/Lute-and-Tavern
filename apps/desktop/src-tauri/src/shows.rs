@@ -180,33 +180,6 @@ pub async fn shows_info(state: State<'_, AppState>) -> Result<ShowsInfo, String>
     .map_err(|e| format!("{e:#}"))
 }
 
-/// Writes the analyzer's song list (`worklist.tsv`: song ID, tab, full path) into the analyzer folder: every
-/// song on this computer that has no show yet. Returns how many songs are on it.
-#[tauri::command]
-pub async fn make_show_list(state: State<'_, AppState>) -> Result<usize, String> {
-    let lib = state.lib.clone();
-    tauri::async_runtime::spawn_blocking(move || -> anyhow::Result<usize> {
-        let mut text = String::new();
-        let mut n = 0;
-        for (uid, path) in lib.songs_with_audio()? {
-            let p = path.to_string_lossy();
-            if has_show(&lib, &uid) || p.contains(['\t', '\n', '\r']) {
-                continue;
-            }
-            text.push_str(&format!("{uid}\t{p}\n"));
-            n += 1;
-        }
-        let dir = analyzer_dir(&lib);
-        std::fs::create_dir_all(&dir)?;
-        std::fs::create_dir_all(local_folder(&lib))?;
-        std::fs::write(dir.join("worklist.tsv"), text)?;
-        Ok(n)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| format!("{e:#}"))
-}
-
 /// The show analyzer's own files (our code; its open-source parts are installed from their makers' sites).
 const ANALYZER_FILES: [(&str, &str); 6] = [
     ("README.md", include_str!("../../../../tools/show-analyzer/README.md")),
@@ -251,7 +224,7 @@ pub async fn open_shows_folder(app: tauri::AppHandle, state: State<'_, AppState>
 
 /// The web pages Settings › Shows links to: each maker's own download page (always their newest release) and
 /// project page. Only these can be opened from there.
-const LINKS: [(&str, &str); 10] = [
+const LINKS: [(&str, &str); 12] = [
     ("python-download", "https://www.python.org/downloads/"),
     ("python-site", "https://www.python.org/"),
     ("pytorch-download", "https://pytorch.org/get-started/locally/"),
@@ -262,6 +235,8 @@ const LINKS: [(&str, &str); 10] = [
     ("librosa-site", "https://librosa.org/"),
     ("ffmpeg-download", "https://pypi.org/project/imageio-ffmpeg/"),
     ("ffmpeg-site", "https://ffmpeg.org/"),
+    ("rocm-download", "https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installrad/windows/install-pytorch.html"),
+    ("rocm-site", "https://www.amd.com/en/products/software/rocm.html"),
 ];
 
 #[tauri::command]
@@ -269,4 +244,242 @@ pub async fn open_show_link(app: tauri::AppHandle, key: String) -> Result<(), St
     use tauri_plugin_opener::OpenerExt;
     let url = LINKS.iter().find(|(k, _)| *k == key).map(|(_, u)| *u).ok_or("Unknown link.")?;
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+}
+
+// ---------- making shows from the app (after the one-time setup) ----------
+
+/// Where a run of the analyzer is: songs done of the list, the song it's on, a failure to show.
+#[derive(Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShowsRun {
+    running: bool,
+    done: usize,
+    total: usize,
+    failed: usize,
+    current: String,
+    error: String,
+}
+
+static RUN: Mutex<Option<ShowsRun>> = Mutex::new(None);
+/// Songs changed while a run was going (or waiting): look again when it ends.
+static AGAIN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// A run is about to start (changes arrive in bursts; wait for them to settle first).
+static PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Songs the analyzer failed on in this session, so a broken file isn't retried on every change.
+static FAILED: Mutex<Option<std::collections::HashSet<String>>> = Mutex::new(None);
+
+fn python_exe(lib: &lt_core::Library) -> Option<std::path::PathBuf> {
+    let p = analyzer_dir(lib).join("python");
+    [p.join("bin/python"), p.join("Scripts/python.exe")].into_iter().find(|x| x.is_file())
+}
+
+fn auto_on(lib: &lt_core::Library) -> bool {
+    lib.settings().ok().and_then(|m| m.get("autoShows").and_then(Value::as_bool)).unwrap_or(true)
+}
+
+fn set_run(app: &tauri::AppHandle, f: impl FnOnce(&mut ShowsRun)) {
+    use tauri::Emitter;
+    let snapshot = {
+        let mut g = RUN.lock().unwrap();
+        let r = g.get_or_insert_with(ShowsRun::default);
+        f(r);
+        r.clone()
+    };
+    let _ = app.emit("shows-progress", snapshot);
+}
+
+/// Songs were added or changed: if shows are made automatically and the analyzer is set up, make shows for new
+/// songs shortly (once the burst of changes settles).
+pub fn songs_changed(app: &tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+    use tauri::Manager;
+    let lib = app.state::<AppState>().lib.clone();
+    if !auto_on(&lib) || python_exe(&lib).is_none() {
+        return;
+    }
+    if RUN.lock().unwrap().as_ref().is_some_and(|r| r.running) {
+        AGAIN.store(true, Ordering::SeqCst);
+        return;
+    }
+    if PENDING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(20));
+        PENDING.store(false, Ordering::SeqCst);
+        let _ = start(&app, None);
+    });
+}
+
+/// Starts the analyzer in the background for every song here without a show (or just `only`). Returns how
+/// many songs it will do; 0 when there's nothing to do or a run is already going (it looks again after).
+fn start(app: &tauri::AppHandle, only: Option<&str>) -> anyhow::Result<usize> {
+    use std::io::BufRead;
+    use std::sync::atomic::Ordering;
+    use tauri::Manager;
+    let lib = app.state::<AppState>().lib.clone();
+    let Some(py) = python_exe(&lib) else { anyhow::bail!("Set up the show analyzer first (Settings › Shows).") };
+    {
+        let mut g = RUN.lock().unwrap();
+        let r = g.get_or_insert_with(ShowsRun::default);
+        if r.running {
+            AGAIN.store(true, Ordering::SeqCst);
+            return Ok(0);
+        }
+        r.running = true;
+    }
+    let failed = FAILED.lock().unwrap().clone().unwrap_or_default();
+    let mut text = String::new();
+    let mut n = 0;
+    for (uid, path) in lib.songs_with_audio()? {
+        let p = path.to_string_lossy();
+        let wanted = match only { Some(u) => u == uid, None => !failed.contains(&uid) };
+        if !wanted || has_show(&lib, &uid) || p.contains(['\t', '\n', '\r']) {
+            continue;
+        }
+        text.push_str(&format!("{uid}\t{p}\n"));
+        n += 1;
+    }
+    let dir = analyzer_dir(&lib);
+    let out = local_folder(&lib);
+    if n == 0 {
+        set_run(app, |r| r.running = false);
+        return Ok(0);
+    }
+    std::fs::create_dir_all(&out)?;
+    std::fs::write(dir.join("worklist.tsv"), text)?;
+    set_run(app, |r| *r = ShowsRun { running: true, total: n, ..Default::default() });
+
+    let mut cmd = std::process::Command::new(&py);
+    cmd.current_dir(&dir)
+        .args(["-u", "run.py", "--list", "worklist.tsv", "--out"])
+        .arg(&out)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // no console window; below-normal priority so the music and the app stay smooth
+        cmd.creation_flags(0x0800_0000 | 0x0000_4000);
+    }
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            set_run(app, |r| {
+                r.running = false;
+                r.error = format!("Couldn't start the show analyzer: {e}");
+            });
+            anyhow::bail!("Couldn't start the show analyzer: {e}");
+        }
+    };
+    #[cfg(unix)]
+    {
+        // a gentle neighbour: lower its priority (like `nice`) so playback stays smooth
+        let _ = std::process::Command::new("renice").args(["-n", "10", "-p", &child.id().to_string()]).output();
+    }
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        let tail = std::sync::Arc::new(Mutex::new(Vec::<String>::new()));
+        let t2 = tail.clone();
+        let err_reader = stderr.map(|e| std::thread::spawn(move || {
+            for line in std::io::BufReader::new(e).lines().map_while(Result::ok) {
+                let mut t = t2.lock().unwrap();
+                t.push(line);
+                if t.len() > 8 {
+                    t.remove(0);
+                }
+            }
+        }));
+        if let Some(o) = stdout {
+            for line in std::io::BufReader::new(o).lines().map_while(Result::ok) {
+                // "[3/10] ok 12.5s <path>  (ok 3, failed 0, ~4 min left)"
+                if let Some(rest) = line.strip_prefix('[') {
+                    let (count, after) = rest.split_once(']').unwrap_or(("", ""));
+                    let done = count.split('/').next().and_then(|d| d.trim().parse().ok()).unwrap_or(0);
+                    let ok = after.trim_start().starts_with("ok");
+                    let current = after.split_once('s').map(|(_, p)| p.split("  (").next().unwrap_or("").trim().rsplit(['/', '\\']).next().unwrap_or("").to_string()).unwrap_or_default();
+                    set_run(&app2, |r| {
+                        r.done = done;
+                        r.current = current;
+                        if !ok {
+                            r.failed += 1;
+                        }
+                    });
+                    MISSES.lock().unwrap().take();
+                } else {
+                    let mut t = tail.lock().unwrap();
+                    t.push(line);
+                    if t.len() > 8 {
+                        t.remove(0);
+                    }
+                }
+            }
+        }
+        if let Some(h) = err_reader {
+            let _ = h.join();
+        }
+        let status = child.wait();
+        // songs the analyzer couldn't do aren't tried again until the app restarts
+        if let Ok(log) = std::fs::read_to_string(local_folder(&app2.state::<AppState>().lib).join("_log.tsv")) {
+            let mut f = FAILED.lock().unwrap();
+            let set = f.get_or_insert_with(Default::default);
+            for l in log.lines().filter(|l| l.starts_with("failed\t")) {
+                if let Some(uid) = l.split('\t').nth(1) {
+                    set.insert(uid.to_string());
+                }
+            }
+        }
+        let ok = status.as_ref().is_ok_and(|s| s.success());
+        let tail = tail.lock().unwrap().join("\n");
+        if !ok {
+            crate::log::write("warn", &format!("show analyzer: {status:?}\n{tail}"));
+        }
+        set_run(&app2, |r| {
+            r.running = false;
+            r.current.clear();
+            if !ok {
+                r.error = if tail.is_empty() { "The show analyzer stopped unexpectedly.".into() } else { tail.lines().last().unwrap_or("").to_string() };
+            }
+        });
+        MISSES.lock().unwrap().take();
+        if AGAIN.swap(false, std::sync::atomic::Ordering::SeqCst) && ok {
+            songs_changed(&app2);
+        }
+    });
+    Ok(n)
+}
+
+/// Makes shows now for every song here without one (or just the song with ID `uid`).
+#[tauri::command]
+pub async fn make_shows_now(app: tauri::AppHandle, uid: Option<String>) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || start(&app, uid.as_deref()))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Where the current (or last) run is.
+#[tauri::command]
+pub fn shows_progress() -> ShowsRun {
+    RUN.lock().unwrap().clone().unwrap_or_default()
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SongShowStatus {
+    has: bool,
+    can_make: bool,
+    making: bool,
+}
+
+/// Whether a song has a show on this computer (or cached from the server), and whether one can be made here.
+#[tauri::command]
+pub async fn song_show_status(state: State<'_, AppState>, uid: String) -> Result<SongShowStatus, String> {
+    let lib = state.lib.clone();
+    let making = RUN.lock().unwrap().as_ref().is_some_and(|r| r.running);
+    Ok(SongShowStatus { has: valid(&uid) && has_show(&lib, &uid), can_make: python_exe(&lib).is_some(), making })
 }

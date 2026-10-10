@@ -229,6 +229,7 @@ export function renderTab() {
       <dt>Added</dt><dd>${date(s.addedAt)}</dd>
       <dt>Song ID</dt><dd>${s.uid ? `<code class="uid">${esc(s.uid)}</code> <button class="btn small" id="uidCopy" title="Copy the song ID">Copy</button>` : '<span class="muted">Given once your server\'s library has been processed</span>'}</dd>
       ${s.songDir ? `<dt>Folder</dt><dd class="path-text">${esc(s.songDir)}</dd>` : ''}
+      ${s.uid && s.hasFile ? '<dt>Visualizer show</dt><dd id="showRow"><span class="muted">…</span></dd>' : ''}
     </dl>
     ${s.source !== 'ai' && !s.provider?.startsWith('apple') ? `<div class="row">${STEM_BUTTONS}</div>` : ''}
     ${s.songDir
@@ -254,6 +255,7 @@ export function renderTab() {
       toast('Artwork added');
     };
     b.querySelector<HTMLElement>('#uidCopy')?.addEventListener('click', () => void copyText(s.uid!, 'Song ID'));
+    void fillShowRow(s.uid);
     b.querySelector<HTMLElement>('#artClear')?.addEventListener('click', async () => { await api.clearArt(s.id); await afterChange(); });
     b.querySelectorAll<HTMLInputElement>('[data-pl]').forEach((cb) => (cb.onchange = async () => {
       await api.toggleInPlaylist(Number(cb.dataset.pl), s.id, cb.checked).catch((e) => toast(errText(e)));
@@ -350,3 +352,27 @@ export function initSong() {
 }
 
 export const activeTab = () => tab;
+
+/** The song panel's "Visualizer show" line: has one, being made, or a button to make it now. */
+async function fillShowRow(uid: string | null) {
+  const row = document.getElementById('showRow');
+  if (!row || !uid) return;
+  const st = await api.songShowStatus(uid).catch(() => null);
+  if (!st || document.getElementById('showRow') !== row) return;
+  if (st.has) {
+    row.innerHTML = 'Ready <span class="muted small">(plays with this song)</span>';
+  } else if (!st.canMake) {
+    row.innerHTML = '<span class="muted">None yet. Set up shows once in Settings › Shows to make them here.</span>';
+  } else {
+    row.innerHTML = `<button class="btn small" id="showMake">Make show</button><span class="muted small" id="showMakeNote">${st.making ? 'Shows are being made in the background.' : ''}</span>`;
+    row.querySelector<HTMLElement>('#showMake')!.onclick = async () => {
+      const note = row.querySelector<HTMLElement>('#showMakeNote')!;
+      try {
+        const n = await api.makeShowsNow(uid);
+        note.textContent = n ? 'Making it in the background. It plays with the song once it\'s ready.' : 'Shows are being made in the background; this song is next.';
+      } catch (e) {
+        note.textContent = errText(e);
+      }
+    };
+  }
+}

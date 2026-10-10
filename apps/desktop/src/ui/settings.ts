@@ -1,7 +1,7 @@
 // Settings: the songwriter connection, music folders, genre tags and the sidebar's starting tab.
-import { audioDir, join } from '@tauri-apps/api/path';
+import { audioDir, homeDir, join } from '@tauri-apps/api/path';
 import { ask, message, open as pickFolder } from '@tauri-apps/plugin-dialog';
-import { api, errText, type ShowsInfo, type McpInfo, type PlexServer, type SpeechSettings, type SyncSettings, type UpdateInfo, type BackupSettings, type BackupSchedule, type PlaylistSyncLast } from '../api';
+import { api, errText, type ShowsInfo, type ShowsRun, type McpInfo, type PlexServer, type SpeechSettings, type SyncSettings, type UpdateInfo, type BackupSettings, type BackupSchedule, type PlaylistSyncLast } from '../api';
 import { comboOf, DEFAULT_KEYS, keyLabel } from './assistant';
 import { connections, loadConnections, syncStatus } from './sources';
 import { crossfade, setCrossfade, applyLineColor, applySkin, LINE_COLORS, SKINS } from '../player';
@@ -11,6 +11,7 @@ import { applePullText, runApplePull } from './apple';
 import { appleStatus, connectApple, disconnectApple, forgetAppleKey, isConnected, musicKit, setAppleKey, type AppleStatus } from '../apple';
 import { libraryFolder, reload, rerender, saveSetting, state } from '../state';
 import { $, copyText, esc, toast } from '../util';
+import { listen } from '@tauri-apps/api/event';
 
 /** Whether a server address is on this computer, the home network (10/8, 172.16/12, 192.168/16, .local) or a
  *  Tailscale network (100.64/10, .ts.net), where plain http doesn't cross the internet. Same rule as the app's
@@ -140,6 +141,7 @@ export async function openSettings(section?: 'writer' | 'servers') {
   backupCfg = await api.backupSettings().catch(() => backupCfg);
   apple = await appleStatus().catch(() => apple);
   showsInfo = await api.showsInfo().catch(() => null);
+  showsRun = await api.showsProgress().catch(() => showsRun);
   if (apple.ready) await musicKit().catch(() => {});
   render();
   const d = $<HTMLDialogElement>('#set');
@@ -939,24 +941,47 @@ const SHOW_TOOLS: { key: string; name: string; by: string; license: string; does
   { key: 'pytorch', name: 'PyTorch', by: 'PyTorch Foundation', license: 'BSD-3-Clause', does: 'Runs Demucs, on your graphics card when it can. Installed by step 3.' },
   { key: 'demucs', name: 'Demucs', by: 'Meta AI Research (Alexandre Défossez and contributors)', license: 'MIT', does: 'Splits each song into vocals, drums, bass and the rest. Installed by step 3.' },
   { key: 'librosa', name: 'librosa', by: 'the librosa development team', license: 'ISC', does: 'Finds the beats, sections, notes and key. Installed by step 3.' },
+  { key: 'rocm', name: 'ROCm', by: 'AMD', license: 'open source (MIT and others)', does: 'Lets PyTorch use AMD graphics cards. On Linux, step 3 installs it. On Windows (Radeon RX 7000 and 9000 series), install AMD\'s PyTorch with AMD\'s guide (Download) after step 3.' },
   { key: 'ffmpeg', name: 'FFmpeg', by: 'the FFmpeg project, via imageio-ffmpeg (BSD-2-Clause)', license: 'LGPL / GPL', does: 'Reads your audio files, whatever their format. Installed by step 3.' },
 ];
 
 const onWindows = () => navigator.platform.startsWith('Win');
+let home = '';
+void homeDir().then((h) => (home = h.replace(/[\\/]+$/, ''))).catch(() => {});
 
+/** A folder for a command line, from the home folder when it's inside it, so no one's user name is on screen. */
+function cdTarget(path: string): string {
+  const inHome = home && (path === home || path.startsWith(home + (onWindows() ? '\\' : '/')));
+  const rest = inHome ? path.slice(home.length + 1) : '';
+  if (onWindows()) return inHome ? `"$HOME\\${rest}"` : `"${path}"`;
+  return inHome ? (rest ? `~/"${rest}"` : '~') : `"${path}"`;
+}
+
+/** Setup and run commands for this computer. The run command works from the analyzer folder, which sits next
+ *  to the Shows folder in _Software. */
 function showCommands(i: ShowsInfo) {
-  const a = i.analyzer, out = i.folder;
+  const cd = cdTarget(i.analyzer);
   return onWindows()
     ? {
         shell: 'PowerShell',
-        setup: `cd "${a}"; powershell -ExecutionPolicy Bypass -File setup.ps1`,
-        run: `cd "${a}"; .\\python\\Scripts\\python.exe run.py --list worklist.tsv --out "${out}"`,
+        setup: `cd ${cd}; powershell -ExecutionPolicy Bypass -File setup.ps1`,
+        run: `cd ${cd}; .\\python\\Scripts\\python.exe run.py --list worklist.tsv --out ..\\Shows`,
       }
     : {
         shell: 'Terminal',
-        setup: `cd "${a}" && bash setup.sh`,
-        run: `cd "${a}" && python/bin/python run.py --list worklist.tsv --out "${out}"`,
+        setup: `cd ${cd} && bash setup.sh`,
+        run: `cd ${cd} && python/bin/python run.py --list worklist.tsv --out ../Shows`,
       };
+}
+
+let showsRun: ShowsRun = { running: false, done: 0, total: 0, failed: 0, current: '', error: '' };
+let showsListening = false;
+
+function runText(r: ShowsRun): string {
+  if (r.running) return r.total ? `Making shows: ${r.done} of ${r.total} done${r.current ? ` · last: ${r.current}` : ''}` : 'Getting ready…';
+  if (r.error) return `Stopped: ${r.error}`;
+  if (r.total) return `Last run: ${r.done - r.failed} made${r.failed ? `, ${r.failed} couldn't be read` : ''}.`;
+  return '';
 }
 
 function renderShows() {
@@ -967,48 +992,72 @@ function renderShows() {
     box.innerHTML = '<h3>Visualizer shows</h3><p class="muted small">Couldn\'t read the Shows folder right now.</p>';
     return;
   }
+  if (!showsListening) {
+    showsListening = true;
+    void listen<ShowsRun>('shows-progress', async (e) => {
+      const wasRunning = showsRun.running;
+      showsRun = e.payload;
+      const el = document.getElementById('shRun');
+      if (el) el.textContent = runText(showsRun);
+      if (wasRunning && !showsRun.running) {
+        showsInfo = await api.showsInfo().catch(() => showsInfo);
+        renderShows();
+      }
+    });
+  }
   const c = showCommands(i);
-  const done = (ok: boolean) => (ok ? ' <span class="muted small">✓ done</span>' : '');
-  const links = (key: string) => `<button class="btn small" data-show-link="${key}-download">Download</button><button class="btn small" data-show-link="${key}-site">Open in web</button>`;
+  const ready = i.pythonReady;
+  const auto = state.settings.autoShows !== false;
+  const step = (n: number, done: boolean, title: string, body: string) =>
+    `<li class="sh-step${done ? ' done' : ''}"><span class="sh-num" aria-hidden="true">${done ? '✓' : n}</span><div class="sh-body"><h4>${title}${done ? '<span class="sr-only"> (done)</span>' : ''}</h4>${body}</div></li>`;
+  const links = (key: string) => `<div class="sh-links"><button class="btn small" data-show-link="${key}-download">Download</button><button class="btn small" data-show-link="${key}-site">Open in web</button></div>`;
+  const pyHint = onWindows()
+    ? 'In the installer, tick <b>Add python.exe to PATH</b>.'
+    : navigator.platform.startsWith('Mac')
+      ? 'Python from Homebrew works too.'
+      : 'Most Linux systems already have it (check with <code>python3 --version</code>). On Ubuntu or Debian, also run <code>sudo apt install python3-venv</code>.';
   box.innerHTML = `
       <h3>Visualizer shows</h3>
-      <p class="muted small">A show is a song's own choreography for the visualizer: its beats, drum hits, bass, voice and big moments, worked out once ahead of time. A song without one still moves with the music by listening to it live. Lute &amp; Tavern looks for a song's show on this computer first, then on your music server (below) if you use one, so shows work however your music is set up.</p>
-      <div class="row"><span class="muted small" id="shCount">${i.shows} show${i.shows === 1 ? '' : 's'} on this computer · ${i.songs ? `${i.without} of your ${i.songs} song${i.songs === 1 ? '' : 's'} here ${i.without === 1 ? 'has' : 'have'} none yet` : 'no songs with audio files here yet'}</span>
-        <button class="btn small" id="shOpenShows">Open Shows folder</button><button class="btn small" id="shRefresh">Refresh</button></div>
-      <p class="muted small">Shows and the analyzer live in the <code>_Software</code> folder inside your library folder (it stays at the top of the list). The app never treats anything in <code>_Software</code> as a song, and never backs up the analyzer's Python.</p>
+      <p class="muted">A show is a song's own choreography for the visualizer: its beats, drum hits, bass, voice and big moments, worked out once ahead of time. Songs without one still move with the music by listening live. Shows on this computer are used first, then shows on your music server (below), so they work however your music is set up.</p>
 
-      <h3>Make shows on this computer</h3>
-      <p class="muted small">Shows are made by the show analyzer, which runs on free, open-source tools you install from their makers (listed under <b>Made with</b>). Lute &amp; Tavern doesn't include or install them: the links below open each maker's own page, which always has their newest version.</p>
-      <ol class="steps">
-        <li><b>Install Python</b> 3.10 or newer.${onWindows() ? ' In the installer, tick <b>Add python.exe to PATH</b>.' : navigator.platform.startsWith('Mac') ? ' (Already have Python from Homebrew? That works too.)' : ' Most Linux systems already have it (check with <code>python3 --version</code>). On Ubuntu or Debian also install <code>python3-venv</code>: <code>sudo apt install python3-venv</code>.'}
-          <div class="row">${links('python')}</div></li>
-        <li><b>Save the show analyzer</b> into <code>_Software/Show analyzer</code>.${done(i.analyzerSaved)}
-          <div class="row"><button class="btn small" id="shSave">${i.analyzerSaved ? 'Save again (refresh the files)' : 'Save analyzer files'}</button>${i.analyzerSaved ? '<button class="btn small" id="shOpenAnalyzer">Open folder</button>' : ''}<span class="muted small" id="shSaveStatus"></span></div></li>
-        <li><b>Set it up, once.</b> Open ${c.shell} and run:${done(i.pythonReady)}
-          <div class="row"><code class="path" id="shSetupCmd">${esc(c.setup)}</code><button class="btn small" id="shCopySetup">Copy</button></div>
-          <span class="muted small">It makes the analyzer's own Python in <code>_Software/Show analyzer/python</code> and installs PyTorch, Demucs, librosa and FFmpeg into it (a few GB; it can take a while). It finishes with <b>Ready</b> and says whether it will use your graphics card (<code>cuda</code> for NVIDIA, <code>mps</code> for Apple Silicon) or the processor (<code>cpu</code>).</span></li>
-        <li><b>Make the song list</b> of the songs here that don't have a show yet.${done(i.listWaiting)}
-          <div class="row"><button class="btn small" id="shList">Make song list</button><span class="muted small" id="shListStatus"></span></div></li>
-        <li><b>Run the analyzer.</b> In ${c.shell}:
-          <div class="row"><code class="path" id="shRunCmd">${esc(c.run)}</code><button class="btn small" id="shCopyRun">Copy</button></div>
-          <span class="muted small">It shows each song as it finishes and how long is left. A graphics card makes it much faster; the processor alone works but takes a lot longer. The first run downloads Demucs's model (about 80 MB). Stop it any time with Ctrl+C and run the same command later: finished songs are skipped.</span></li>
-        <li><b>That's it.</b> Each new show is used the next time its song plays, with no restart. Added songs later? Do steps 4 and 5 again.</li>
+      <div class="sh-status">
+        <div><b>${i.shows}</b> show${i.shows === 1 ? '' : 's'} on this computer${i.songs ? ` · <b>${i.without}</b> of ${i.songs} song${i.songs === 1 ? '' : 's'} still without one` : ''}</div>
+        <div class="muted small" id="shRun" aria-live="polite">${esc(runText(showsRun))}</div>
+        <div class="row"><button class="btn small" id="shOpenShows">Open Shows folder</button><button class="btn small" id="shRefresh">Refresh</button></div>
+      </div>
+
+      ${ready ? `
+      <div class="sh-auto">
+        <label class="row"><input type="checkbox" id="shAuto" ${auto ? 'checked' : ''}> Make shows automatically when songs are added</label>
+        <div class="row"><button class="btn primary" id="shNowAll" ${i.without ? '' : 'disabled'}>Make shows now</button><span class="muted small">${i.without ? `For the ${i.without} song${i.without === 1 ? '' : 's'} without one. Runs in the background; keep listening while it works.` : 'Every song here has a show.'}</span></div>
+        <p class="muted small">You can also make one song's show from its panel. Shows are ready the next time a song plays.</p>
+      </div>` : ''}
+
+      <h3>${ready ? 'Setup (done)' : 'Set up shows (once)'}</h3>
+      <p class="muted small">Shows are made by the show analyzer, which runs on free, open-source tools from their makers (see <b>Made with</b>). Lute &amp; Tavern doesn't include or install them; the links open each maker's own page, which always has their newest version. After these three steps the app makes shows by itself.</p>
+      <ol class="sh-steps">
+        ${step(1, ready, 'Install Python', `<p>Version 3.10 to 3.14. ${pyHint}</p>${links('python')}`)}
+        ${step(2, i.analyzerSaved, 'Save the show analyzer', `<p>Puts its files in <code>_Software/Show analyzer</code> in your library folder.</p>
+          <div class="row"><button class="btn small" id="shSave">${i.analyzerSaved ? 'Save again' : 'Save analyzer files'}</button>${i.analyzerSaved ? '<button class="btn small" id="shOpenAnalyzer">Open folder</button>' : ''}<span class="muted small" id="shSaveStatus"></span></div>`)}
+        ${step(3, ready, 'Run the setup', `<p>Open ${c.shell}, paste this and press Return:</p>
+          <div class="sh-cmd"><code>${esc(c.setup)}</code><button class="btn small" id="shCopySetup">Copy</button></div>
+          <p class="muted small">It gives the analyzer its own Python in <code>_Software/Show analyzer/python</code> and installs PyTorch, Demucs, librosa and FFmpeg there (a few GB; it can take a while). It ends with <b>Ready</b> and the device it will use: <code>cuda</code> (NVIDIA, or AMD on Linux), <code>mps</code> (a Mac's graphics) or <code>cpu</code> (the processor, slower).${onWindows() ? ' With an AMD card on Windows, see <b>ROCm</b> below.' : ''} Then press <b>Refresh</b> above.</p>`)}
       </ol>
 
       <h3>Made with</h3>
-      <ul class="set-list" id="shTools">${SHOW_TOOLS.map((t) => `<li><span class="path"><b>${t.name}</b> <span class="muted small">by ${esc(t.by)} · ${esc(t.license)}<br>${esc(t.does)}</span></span>${links(t.key)}</li>`).join('')}</ul>
+      <ul class="sh-tools">${SHOW_TOOLS.map((t) => `<li><div class="sh-tool"><b>${t.name}</b><span class="muted small">${esc(t.by)} · ${esc(t.license)}</span><span class="small">${esc(t.does)}</span></div>${links(t.key)}</li>`).join('')}</ul>
       <p class="muted small">This app doesn't monitor the updates for these attachments.</p>`;
 
   box.querySelectorAll<HTMLElement>('[data-show-link]').forEach((b) => (b.onclick = () => void api.openShowLink(b.dataset.showLink!).catch((e) => toast(errText(e)))));
   const again = async () => {
     showsInfo = await api.showsInfo().catch(() => showsInfo);
+    showsRun = await api.showsProgress().catch(() => showsRun);
     renderShows();
   };
   $('#shRefresh').onclick = () => void again();
   $('#shOpenShows').onclick = () => void api.openShowsFolder('shows').catch((e) => toast(errText(e)));
   document.getElementById('shOpenAnalyzer')?.addEventListener('click', () => void api.openShowsFolder('analyzer').catch((e) => toast(errText(e))));
   $('#shCopySetup').onclick = () => copyText(c.setup, 'Command');
-  $('#shCopyRun').onclick = () => copyText(c.run, 'Command');
   $('#shSave').onclick = async () => {
     $('#shSaveStatus').textContent = 'Saving…';
     try {
@@ -1019,14 +1068,15 @@ function renderShows() {
       $('#shSaveStatus').textContent = errText(e);
     }
   };
-  $('#shList').onclick = async () => {
-    $('#shListStatus').textContent = 'Making the list…';
+  document.getElementById('shAuto')?.addEventListener('change', async (e) => {
+    await saveSetting('autoShows', (e.target as HTMLInputElement).checked);
+  });
+  document.getElementById('shNowAll')?.addEventListener('click', async () => {
     try {
-      const n = await api.makeShowList();
-      await again();
-      $('#shListStatus').textContent = n ? `${n} song${n === 1 ? '' : 's'} on the list. Now run step 5.` : 'Every song here already has a show.';
+      const n = await api.makeShowsNow();
+      $('#shRun').textContent = n ? `Making shows for ${n} song${n === 1 ? '' : 's'}…` : runText(showsRun) || 'Already making shows.';
     } catch (e) {
-      $('#shListStatus').textContent = errText(e);
+      $('#shRun').textContent = errText(e);
     }
-  };
+  });
 }

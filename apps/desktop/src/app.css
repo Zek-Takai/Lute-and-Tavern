@@ -240,3 +240,22 @@ body{padding-block:0}
 /* no artwork: the app's logo, centered on a dark panel */
 .noart{background-color:#151838 !important;background-size:52% !important;background-position:center !important;background-repeat:no-repeat !important}
 .th.noart,.np-art.noart{background-size:68% !important}
+
+/* Settings › Shows */
+.set-sec h4 { margin: 0; font: 600 15px/1.3 var(--body); }
+.sh-status, .sh-auto { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.sh-auto label { gap: 10px; cursor: pointer; }
+.sh-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.sh-step { display: grid; grid-template-columns: 32px 1fr; gap: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; }
+.sh-step.done { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.sh-num { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font: 700 15px/1 var(--body); background: var(--accent-soft); color: var(--ink); }
+.sh-step.done .sh-num { background: var(--accent); color: var(--accent-ink); font-size: 17px; }
+.sh-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.sh-body p { line-height: 1.5; }
+.sh-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.sh-cmd { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+.sh-cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 13px; padding-bottom: 2px; }
+.sh-tools { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.sh-tools li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; }
+.sh-tool { display: flex; flex-direction: column; gap: 4px; flex: 1 1 260px; min-width: 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

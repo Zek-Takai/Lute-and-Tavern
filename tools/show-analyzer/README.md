@@ -11,7 +11,7 @@ Settings › Shows walks through it. The app saves these files to `_Software/Sho
 folder, writes the song list (`worklist.tsv`) there, and reads shows from `_Software/Shows`. Everything in
 `_Software` is left alone by the organizer, song scans and backups.
 
-1. Install Python 3.10 or newer (python.org).
+1. Install Python 3.10 to 3.14 (python.org).
 2. Set up once, in this folder: `bash setup.sh` (macOS, Linux) or
    `powershell -ExecutionPolicy Bypass -File setup.ps1` (Windows). It makes its own Python environment in
    `python/` here and installs PyTorch, Demucs and librosa (a few GB). An NVIDIA GPU or Apple Silicon makes

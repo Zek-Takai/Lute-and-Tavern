@@ -46,6 +46,7 @@ export interface Song {
   artUrl: string | null;
 }
 export interface ChatLine { id: number; role: 'user' | 'assistant' | 'action'; text: string; createdAt: number }
+export interface ShowsRun { running: boolean; done: number; total: number; failed: number; current: string; error: string }
 export interface ShowsInfo { folder: string; analyzer: string; analyzerSaved: boolean; pythonReady: boolean; listWaiting: boolean; shows: number; songs: number; without: number }
 export interface SpeechSettings { baseUrl: string; model: string; language: string; hasKey: boolean }
 export interface Station { uuid: string; name: string; url: string; homepage: string; favicon: string; country: string; tags: string; codec: string; bitrate: number; favorite: boolean }
@@ -150,10 +151,12 @@ export const api = {
   backupNow: () => invoke<void>('backup_now'),
   refreshSongIds: () => invoke<number>('refresh_song_ids'),
   showsInfo: () => invoke<ShowsInfo>('shows_info'),
-  makeShowList: () => invoke<number>('make_show_list'),
   saveShowAnalyzer: () => invoke<string>('save_show_analyzer'),
   openShowsFolder: (which: 'shows' | 'analyzer') => invoke<void>('open_shows_folder', { which }),
   openShowLink: (key: string) => invoke<void>('open_show_link', { key }),
+  makeShowsNow: (uid: string | null = null) => invoke<number>('make_shows_now', { uid }),
+  showsProgress: () => invoke<ShowsRun>('shows_progress'),
+  songShowStatus: (uid: string) => invoke<{ has: boolean; canMake: boolean; making: boolean }>('song_show_status', { uid }),
   syncPlaylists: () => invoke<{ ran: boolean; last: PlaylistSyncLast | null }>('sync_playlists'),
   importPlaylists: (files: string[]) => invoke<ImportedPlaylist[]>('import_playlists', { files }),
   syncSettings: () => invoke<SyncSettings>('sync_settings'),

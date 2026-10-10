@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-shows-progress"
+description = "Enables the shows_progress command without any pre-configured scope."
+commands.allow = ["shows_progress"]
+
+[[permission]]
+identifier = "deny-shows-progress"
+description = "Denies the shows_progress command without any pre-configured scope."
+commands.deny = ["shows_progress"]

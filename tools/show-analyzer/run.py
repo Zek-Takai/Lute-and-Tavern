@@ -3,6 +3,7 @@ import argparse
 import json
 import multiprocessing as mp
 import os
+import queue
 import time
 import traceback
 
@@ -59,7 +60,14 @@ def main():
     t0, ok, failed = time.time(), 0, 0
     with open(os.path.join(args.out, "_log.tsv"), "a", encoding="utf-8") as log:
         for i in range(len(todo)):
-            state, uid, rel, secs, info = done.get()
+            while True:
+                try:
+                    state, uid, rel, secs, info = done.get(timeout=10)
+                    break
+                except queue.Empty:
+                    if not any(p.is_alive() for p in procs):
+                        print("The analyzer stopped unexpectedly (see the error above). Run setup again, then try once more.", flush=True)
+                        raise SystemExit(1)
             ok += state == "ok"
             failed += state == "failed"
             log.write(f"{state}\t{uid}\t{secs}\t{rel}\t{info if state == 'failed' else info}\n".replace("\n\t", " "))

@@ -360,6 +360,7 @@ async fn set_status(state: State<'_, AppState>, song: i64, status: String) -> Re
 
 pub fn emit_library_changed(app: &tauri::AppHandle) {
     let _ = app.emit("library-changed", ());
+    shows::songs_changed(app);
 }
 
 /// Port the installed app serves its interface on (only reachable from this computer).
@@ -465,6 +466,7 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("lt", protocol::handle)
         .setup(|app| {
             main_window(app)?;
+            shows::songs_changed(app.handle());
             if let Err(e) = relay::start(app.handle()) {
                 log::write("error", &e);
             }
@@ -585,10 +587,12 @@ pub fn run() {
             shows::song_show,
             shows::refresh_song_ids,
             shows::shows_info,
-            shows::make_show_list,
             shows::save_show_analyzer,
             shows::open_shows_folder,
             shows::open_show_link,
+            shows::make_shows_now,
+            shows::shows_progress,
+            shows::song_show_status,
             reveal_song,
             pull_apple_library,
             add_apple_to_playlist,
