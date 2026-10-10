@@ -97,9 +97,17 @@ if [[ ! -f "$key" ]]; then
   mkdir -p "${key:h}"
   npx tauri signer generate -w "$key"
 fi
-print -n "Password for the update-signing key: "
-read -rs key_password
-print
+# The password can come from a private file (read once, then deleted), e.g. one fetched from a secret store;
+# otherwise it's asked for.
+if [[ -n "${LT_UPDATE_KEY_PASSWORD_FILE:-}" && -r "$LT_UPDATE_KEY_PASSWORD_FILE" ]]; then
+  key_password=$(<"$LT_UPDATE_KEY_PASSWORD_FILE")
+  rm -f "$LT_UPDATE_KEY_PASSWORD_FILE"
+  print "Update-signing key password read from LT_UPDATE_KEY_PASSWORD_FILE (file deleted)."
+else
+  print -n "Password for the update-signing key: "
+  read -rs key_password
+  print
+fi
 
 # Apple Music access built into this release: a fresh developer token from your MusicKit key. The key is read
 # from your Keychain (where the app keeps it) and never printed; the token is baked into the app scrambled.
