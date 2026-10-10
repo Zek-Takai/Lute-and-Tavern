@@ -19,7 +19,7 @@ folder, writes the song list (`worklist.tsv`) there, and reads shows from `_Soft
 3. In the app: Make song list.
 4. Run: `python/bin/python run.py --list worklist.tsv --out "<Shows folder>"`
    (Windows: `python\Scripts\python.exe run.py ...`). Finished shows are skipped, so it can be stopped and
-   started again. The first run downloads Demucs's model (about 80 MB).
+   started again. The first run downloads Demucs's model (about 80 MB) into `models/` here.
 
 ## On a server
 

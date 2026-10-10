@@ -7,6 +7,9 @@ import queue
 import time
 import traceback
 
+# Demucs's model is kept next to the analyzer (models/), not in the user's general cache folder.
+os.environ.setdefault("TORCH_HOME", os.path.join(os.path.dirname(os.path.abspath(__file__)), "models"))
+
 
 def worker(q, done, args):
     import imageio_ffmpeg

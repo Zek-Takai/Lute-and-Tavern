@@ -62,10 +62,10 @@ impl Library {
 fn local_files(root: &Path) -> HashMap<String, Local> {
     walkdir::WalkDir::new(root)
         .into_iter()
-        // hidden files, and the show analyzer's Python environment (gigabytes of this computer's own programs)
+        // hidden files, and the show analyzer's Python environment and model (gigabytes this computer can redownload)
         .filter_entry(|e| {
             let python_env = e.depth() == 3
-                && e.file_name() == "python"
+                && (e.file_name() == "python" || e.file_name() == "models")
                 && e.path().parent().and_then(Path::parent).is_some_and(|p| p.file_name().is_some_and(|n| n == crate::organize::SOFTWARE));
             e.depth() == 0 || !(e.file_name().to_string_lossy().starts_with('.') || python_env)
         })
