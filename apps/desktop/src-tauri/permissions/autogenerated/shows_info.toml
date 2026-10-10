@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-shows-info"
+description = "Enables the shows_info command without any pre-configured scope."
+commands.allow = ["shows_info"]
+
+[[permission]]
+identifier = "deny-shows-info"
+description = "Denies the shows_info command without any pre-configured scope."
+commands.deny = ["shows_info"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-save-show-analyzer"
+description = "Enables the save_show_analyzer command without any pre-configured scope."
+commands.allow = ["save_show_analyzer"]
+
+[[permission]]
+identifier = "deny-save-show-analyzer"
+description = "Denies the save_show_analyzer command without any pre-configured scope."
+commands.deny = ["save_show_analyzer"]

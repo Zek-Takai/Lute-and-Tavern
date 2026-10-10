@@ -26,7 +26,8 @@ impl Watcher {
             // The library folder is organized as a whole: new files get moved into song folders first.
             if let Ok(Some(lib_folder)) = lib.library_folder() {
                 let root = Path::new(&lib_folder.path);
-                let inside: Vec<std::path::PathBuf> = events.iter().filter(|e| e.path.starts_with(root)).map(|e| e.path.clone()).collect();
+                let software = root.join(lt_core::organize::SOFTWARE);
+                let inside: Vec<std::path::PathBuf> = events.iter().filter(|e| e.path.starts_with(root) && !e.path.starts_with(&software)).map(|e| e.path.clone()).collect();
                 if !inside.is_empty() {
                     if let Ok(r) = lib.scan_folder(&lib_folder) {
                         changed |= r.added + r.updated + r.removed > 0;

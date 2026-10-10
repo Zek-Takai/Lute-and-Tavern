@@ -22,6 +22,9 @@ use std::time::{Duration, SystemTime};
 
 pub const SONGS: &str = "Songs";
 pub const ALBUMS: &str = "Albums";
+/// Programs and data that aren't songs (the show analyzer and its Python, made shows). Never organized, scanned
+/// for songs or tidied; the underscore keeps it at the top of the folder list.
+pub const SOFTWARE: &str = "_Software";
 pub const SIDECAR: &str = "song.json";
 
 /// A file or folder name that is safe on macOS, Windows and Linux.
@@ -70,6 +73,7 @@ pub fn place_of(root: &Path, path: &Path) -> Place {
     };
     let parts: Vec<&str> = rel.iter().filter_map(|s| s.to_str()).collect();
     match parts.as_slice() {
+        [s, ..] if *s == SOFTWARE => Place::Extra,
         [s, dir, file] if *s == SONGS => {
             if tags::stem_of(Path::new(file)).is_some() {
                 Place::Loose
@@ -169,6 +173,7 @@ fn prune_empty_dirs(root: &Path) {
     let keep = [root.to_path_buf(), root.join(SONGS), root.join(ALBUMS)];
     let mut dirs: Vec<PathBuf> = walkdir::WalkDir::new(root)
         .into_iter()
+        .filter_entry(|e| e.depth() != 1 || e.file_name() != SOFTWARE)
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_dir())
         .map(|e| e.into_path())
@@ -291,6 +296,7 @@ impl Library {
         let root = PathBuf::from(&folder.path);
         let loose: Vec<PathBuf> = walkdir::WalkDir::new(&root)
             .into_iter()
+            .filter_entry(|e| e.depth() != 1 || e.file_name() != SOFTWARE)
             .filter_map(|e| e.ok())
             .filter(|e| e.file_type().is_file() && tags::is_audio(e.path()))
             .map(|e| e.into_path())
@@ -820,8 +826,30 @@ mod tests {
     }
 
     #[test]
+    fn software_folder_is_left_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let l = Library::open(&tmp.path().join("data")).unwrap();
+        let lib = tmp.path().join("Library");
+        let test_wav = lib.join(SOFTWARE).join("Show analyzer/python/lib/pkg/tests/data/test.wav");
+        old_file(&test_wav);
+        std::fs::create_dir_all(lib.join(SOFTWARE).join("Shows")).unwrap();
+        old_file(&lib.join("A Real Song.mp3"));
+        let f = l.set_library_folder(&lib).unwrap();
+        l.scan_folder(&f).unwrap();
+
+        assert!(test_wav.is_file(), "a file in _Software was moved");
+        assert!(lib.join(SOFTWARE).join("Shows").is_dir(), "an empty folder in _Software was removed");
+        let titles: Vec<String> = l.songs().unwrap().into_iter().map(|s| s.title).collect();
+        assert_eq!(titles, vec!["A Real Song".to_string()]);
+    }
+
+    #[test]
     fn places() {
         let r = Path::new("/lib");
+        assert_eq!(
+            place_of(r, Path::new("/lib/_Software/Show analyzer/python/lib/scipy/io/tests/data/test.wav")),
+            Place::Extra
+        );
         assert_eq!(
             place_of(r, Path::new("/lib/Songs/A/A.mp3")),
             Place::Main(r.join("Songs/A"))

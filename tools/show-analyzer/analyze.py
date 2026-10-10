@@ -30,11 +30,21 @@ def load(path: str, ffmpeg: str) -> np.ndarray:
     return np.frombuffer(raw, dtype=np.float32).reshape(-1, 2).T.copy()
 
 
+def best_device(torch) -> str:
+    """An NVIDIA GPU if there is one, else Apple Silicon's GPU, else the processor."""
+    if torch.cuda.is_available():
+        return "cuda"
+    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
 class Separator:
-    def __init__(self, device: str = "cuda"):
+    def __init__(self, device: str = ""):
         import torch
         from demucs.pretrained import get_model
         self.torch = torch
+        device = device or best_device(torch)
         self.model = get_model("htdemucs").to(device).eval()
         self.device = device
 

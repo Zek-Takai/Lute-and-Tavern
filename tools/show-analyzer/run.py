@@ -20,7 +20,7 @@ def worker(q, done, args):
         out = os.path.join(args.out, f"{uid}.json")
         t0 = time.time()
         try:
-            show = analyze(uid, os.path.join(args.music, rel), ffmpeg, sep)
+            show = analyze(uid, rel if os.path.isabs(rel) else os.path.join(args.music, rel), ffmpeg, sep)
             tmp = out + ".part"
             with open(tmp, "w") as f:
                 json.dump(show, f, separators=(",", ":"))
@@ -32,10 +32,10 @@ def worker(q, done, args):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--music", required=True)
+    ap.add_argument("--music", default="", help="music root for relative paths in the list (lists made by the app use full paths)")
     ap.add_argument("--list", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--workers", type=int, default=3)
+    ap.add_argument("--workers", type=int, default=1, help="songs at once; 2-3 can help on a large NVIDIA GPU")
     ap.add_argument("--limit", type=int, default=0)
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)

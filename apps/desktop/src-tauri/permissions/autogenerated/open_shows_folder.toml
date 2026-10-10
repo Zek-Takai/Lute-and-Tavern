@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-shows-folder"
+description = "Enables the open_shows_folder command without any pre-configured scope."
+commands.allow = ["open_shows_folder"]
+
+[[permission]]
+identifier = "deny-open-shows-folder"
+description = "Denies the open_shows_folder command without any pre-configured scope."
+commands.deny = ["open_shows_folder"]

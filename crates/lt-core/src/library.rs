@@ -712,6 +712,7 @@ impl Library {
         let mut files: Vec<PathBuf> = walkdir::WalkDir::new(&root)
             .follow_links(true)
             .into_iter()
+            .filter_entry(|e| !(folder.managed && e.depth() == 1 && e.file_name() == crate::organize::SOFTWARE))
             .filter_map(|e| {
                 if e.is_err() {
                     walk_complete = false;
@@ -2030,6 +2031,23 @@ impl Library {
             )
             .optional()?;
         Ok(take.map(PathBuf::from))
+    }
+
+    /// Every song with its song ID and an audio file on this computer (its own file or its master take), for the
+    /// show analyzer's song list.
+    pub fn songs_with_audio(&self) -> Result<Vec<(String, PathBuf)>> {
+        let ids: Vec<(i64, String)> = {
+            let db = self.db();
+            let mut st = db.prepare("SELECT id, uid FROM songs WHERE uid IS NOT NULL AND provider <> 'remote' ORDER BY id")?;
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?
+        };
+        let mut out = Vec::new();
+        for (id, uid) in ids {
+            if let Some(p) = self.audio_path(id)?.filter(|p| p.is_file()) {
+                out.push((uid, p));
+            }
+        }
+        Ok(out)
     }
 
     pub fn take_path(&self, id: i64) -> Result<Option<PathBuf>> {
