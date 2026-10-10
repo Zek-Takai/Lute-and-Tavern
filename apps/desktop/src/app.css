@@ -242,6 +242,8 @@ body{padding-block:0}
 .th.noart,.np-art.noart{background-size:68% !important}
 
 /* Settings › Shows */
+#setShowsGuide { display: flex; flex-direction: column; gap: 14px; }
+#setShowsGuide > h3:not(:first-child) { margin-top: 14px; }
 .set-sec h4 { margin: 0; font: 600 15px/1.3 var(--body); }
 .sh-status, .sh-auto { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .sh-auto label { gap: 10px; cursor: pointer; }
