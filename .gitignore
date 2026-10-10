@@ -4,3 +4,4 @@ dist/
 apps/desktop/src-tauri/gen/
 .DS_Store
 *.log
+release/
