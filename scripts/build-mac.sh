@@ -16,6 +16,12 @@
 #   2. A notary login:  xcrun notarytool store-credentials "lute-and-tavern" --apple-id EMAIL --team-id TEAM_ID
 #   3. An update-signing key. The script creates ~/.tauri/lute-and-tavern.key the first time and asks you for
 #      a password. Back that file up: without it, installed copies can never receive another update.
+#   4. Your MusicKit key saved in the app (Settings › Music services › Apple Music › Use your own MusicKit key).
+#      Each release gets a fresh Apple Music developer token made from it (Apple allows about six months), so
+#      people don't need a key of their own. Or point LT_MUSICKIT_P8 at the AuthKey_….p8 file instead.
+#      LT_MUSICKIT_SKIP=1 releases without built-in Apple Music access.
+# After building, the release goes to your update server with scripts/publish-update.sh (set LT_UPDATE_UPLOAD;
+# see that script). Installed copies then get it through the app's own updater; GitHub isn't needed.
 # Set LT_UPDATE_BASE_URL to the web folder the release files will live in, e.g.
 #   LT_UPDATE_BASE_URL=https://downloads.example.com/lute-and-tavern scripts/build-mac.sh --release
 # Other overrides: LT_SIGN_IDENTITY (certificate name or part of it), LT_NOTARY_PROFILE (default lute-and-tavern).
@@ -95,6 +101,31 @@ print -n "Password for the update-signing key: "
 read -rs key_password
 print
 
+# Apple Music access built into this release: a fresh developer token from your MusicKit key. The key is read
+# from your Keychain (where the app keeps it) and never printed; the token is baked into the app scrambled.
+if [[ -z "${LT_MUSICKIT_SKIP:-}" ]]; then
+  db="$HOME/Library/Application Support/com.luteandtavern.app/library.db"
+  setting() { sqlite3 -readonly "$db" "select value from settings where key = '$1'" 2>/dev/null | tr -d '"'; }
+  kid=${LT_MUSICKIT_KEY_ID:-$(setting musickitKeyId)}
+  team=${LT_MUSICKIT_TEAM_ID:-$(setting musickitTeamId)}
+  [[ -z "$kid" && -n "${LT_MUSICKIT_P8:-}" ]] && kid=${${LT_MUSICKIT_P8:t:r}#AuthKey_}
+  [[ -z "$team" ]] && team=${${identity##*\(}%\)}
+  if [[ -n "${LT_MUSICKIT_P8:-}" ]]; then
+    token=$(node ../../scripts/musickit-token.mjs "$kid" "$team" 180 < "$LT_MUSICKIT_P8") || token=""
+  else
+    token=$(security find-generic-password -s "Lute & Tavern" -a musickit-private-key -w 2>/dev/null | node ../../scripts/musickit-token.mjs "$kid" "$team" 180) || token=""
+  fi
+  if [[ -z "$token" ]]; then
+    print "Couldn't make the Apple Music token: no MusicKit key found (Key ID \"$kid\", Team ID \"$team\")."
+    print "Save your key in the app (Settings › Music services › Apple Music), set LT_MUSICKIT_P8 to the .p8 file,"
+    print "or release without built-in Apple Music access: LT_MUSICKIT_SKIP=1 scripts/build-mac.sh --release"
+    exit 1
+  fi
+  export LT_MUSICKIT_TOKEN="$token"
+  unset token
+  print "Apple Music access built in until $(date -v+180d '+%B %-d, %Y') (Key ID $kid). Release again before then."
+fi
+
 base="${LT_UPDATE_BASE_URL:-}"
 base=${base%/}
 export TAURI_SIGNING_PRIVATE_KEY="$key"
@@ -124,7 +155,8 @@ if [[ -n "$base" ]]; then
   VERSION="$version" URL="$base/Lute-and-Tavern-$version-mac-arm64.app.tar.gz" SIG="$(cat "$tarball.sig")" \
     node -e 'console.log(JSON.stringify({version: process.env.VERSION, notes: "", pub_date: new Date().toISOString(),
       platforms: {"darwin-aarch64": {signature: process.env.SIG, url: process.env.URL}}}, null, 2))' > "$out/latest.json"
-  print "\nRelease ready in $(cd "$out" && pwd). Upload everything in it to $base/"
+  print "\nRelease ready in $(cd "$out" && pwd)."
+  ../../scripts/publish-update.sh "$out"
 else
   print "\nRelease ready in $(cd "$out" && pwd)."
   print "No LT_UPDATE_BASE_URL was set, so there is no latest.json and this build has no built-in update address."
