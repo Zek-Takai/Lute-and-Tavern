@@ -84,7 +84,7 @@ function plSyncText(l?: PlaylistSyncLast): string {
 let backupCfg: BackupSettings = { conn: null, folder: 'Music/Lute & Tavern', schedule: { mode: 'weekly', day: 0, time: '16:00' }, last: null, lastReport: null, next: null, running: false };
 let syncCfg: SyncSettings = { kind: 'none', address: 'http://127.0.0.1:8384', command: '', hasKey: false };
 let mcp: McpInfo = { enabled: false, running: false, url: '', error: null };
-let apple: AppleStatus = { ready: false, builtIn: false, keyId: '', teamId: '' };
+let apple: AppleStatus = { ready: false, builtIn: false, builtInUntil: 0, builtInExpired: false, ownKey: false, keyId: '', teamId: '' };
 
 const reportText = (r: { added: number; untagged: number }) =>
   `${r.added} song${r.added === 1 ? '' : 's'} added${r.untagged ? `. ${r.untagged} had no genre tag and wait in Unsorted.` : '.'}`;
@@ -260,13 +260,24 @@ function render() {
       <h3>Apple Music</h3>
       <p class="muted small">Play Apple Music inside Lute &amp; Tavern with your Apple Music subscription. Your Apple ID sign-in and every key stay in your Mac's Keychain, never in the app's files.</p>
       <ol class="steps small">
-        ${apple.builtIn ? '' : `<li><b>MusicKit key.</b> ${apple.ready ? `Saved in your Keychain (Key ID ${esc(apple.keyId)}). <button class="btn small" id="amForget">Remove key</button>` : `Choose the AuthKey_….p8 file from developer.apple.com, check the Team ID, then save.
-          <div class="row" style="margin-top:6px"><button class="btn small" id="amKey">Choose the .p8 file…</button><span class="muted" id="amFile">No file chosen</span></div>
-          <div class="form" style="margin-top:6px"><label for="amKeyId">Key ID</label><input id="amKeyId" value="${esc(apple.keyId)}" placeholder="Filled in from the file name">
-            <label for="amTeam">Team ID</label><input id="amTeam" value="${esc(apple.teamId)}" placeholder="10 characters, under Membership"></div>
-          <div class="row" style="margin-top:6px"><button class="btn primary small" id="amSave" disabled>Save key</button><span class="muted" id="amStatus"></span></div>`}</li>`}
+        <li><b>Apple Music access.</b> ${apple.ownKey
+          ? 'Using your own MusicKit key (below).'
+          : apple.builtIn
+            ? apple.builtInExpired
+              ? '<span class="warn">The access built into this version has run out.</span> Update Lute &amp; Tavern, or add your own MusicKit key below.'
+              : `Built in, nothing to add.${apple.builtInUntil ? ` <span class="muted">Works until ${new Date(apple.builtInUntil * 1000).toLocaleDateString()}; updates renew it.</span>` : ''}`
+            : 'This copy has no Apple Music access built in, so add your own MusicKit key below.'}
+          <details class="am-own" ${apple.ownKey || !apple.builtIn || apple.builtInExpired ? 'open' : ''}>
+            <summary>Use your own MusicKit key (optional)</summary>
+            <p class="muted small">You don't have to add a key unless the built-in Apple Music access stops working. A key you add here is used instead of the built-in access, and stays in your Keychain.</p>
+            ${apple.ownKey ? `<div class="row">Saved in your Keychain (Key ID ${esc(apple.keyId)}). <button class="btn small" id="amForget">Remove key</button></div>` : `<p class="small">Choose the AuthKey_….p8 file from developer.apple.com, check the Team ID, then save.</p>
+            <div class="row"><button class="btn small" id="amKey">Choose the .p8 file…</button><span class="muted" id="amFile">No file chosen</span></div>
+            <div class="form"><label for="amKeyId">Key ID</label><input id="amKeyId" value="${esc(apple.keyId)}" placeholder="Filled in from the file name">
+              <label for="amTeam">Team ID</label><input id="amTeam" value="${esc(apple.teamId)}" placeholder="10 characters, under Membership"></div>
+            <div class="row"><button class="btn primary small" id="amSave" disabled>Save key</button><span class="muted" id="amStatus"></span></div>`}
+          </details></li>
         <li><b>Sign in.</b> <button class="btn ${isConnected() ? '' : 'primary'} small" id="amOn" ${apple.ready && !isConnected() ? '' : 'disabled'}>${isConnected() ? 'Connected' : 'Connect Apple Music'}</button>
-          ${isConnected() ? '<button class="btn small" id="amOff">Disconnect</button>' : apple.ready ? '' : '<span class="muted">Available once the key is saved.</span>'}</li>
+          ${isConnected() ? '<button class="btn small" id="amOff">Disconnect</button>' : apple.ready ? '' : '<span class="muted">Available once Apple Music access is set up (above).</span>'}</li>
       </ol>
       <label class="row small"><input type="checkbox" id="amShow" ${state.settings.showAppleInLibrary === false ? '' : 'checked'}> Show saved Apple Music songs in my library (they always show in playlists and the Apple Music tab)</label>
       <label class="row small"><input type="checkbox" id="amPull" ${state.settings.appleLibrarySync ? 'checked' : ''}> Bring my Apple Music songs and playlists into My music (refreshed when the app opens and every few hours). Songs you already have as files, or on your music server, are used instead of the Apple copy.</label>

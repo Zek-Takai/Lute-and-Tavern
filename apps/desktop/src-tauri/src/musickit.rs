@@ -1,16 +1,33 @@
 //! Apple Music (MusicKit on the Web). The interface plays Apple Music through Apple's own MusicKit JS;
 //! this side provides the developer token it needs.
 //!
-//! Released builds carry a token made at build time (LT_MUSICKIT_TOKEN). People building the app
-//! themselves add their own MusicKit key in Settings: the key goes into the system keychain and the
-//! app signs short-lived tokens from it. The key never leaves the keychain.
+//! Released builds carry a token made at build time (LT_MUSICKIT_TOKEN), stored scrambled inside the program
+//! and never shown. Anyone can add their own MusicKit key in Settings instead (needed only for builds without
+//! one, or once the built-in token has run out): the key goes into the system keychain, the app signs
+//! short-lived tokens from it, and it's used in place of the built-in token. The key never leaves the keychain.
 
 use crate::AppState;
 use serde::Serialize;
 use std::sync::Mutex;
 use tauri::State;
 
-const EMBEDDED: Option<&str> = option_env!("LT_MUSICKIT_TOKEN");
+const SCRAMBLED: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/musickit_token.bin"));
+const MASK: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/musickit_mask.bin"));
+
+/// The token built into this release, if any.
+fn embedded() -> Option<String> {
+    if SCRAMBLED.is_empty() {
+        return None;
+    }
+    String::from_utf8(SCRAMBLED.iter().zip(MASK).map(|(b, m)| b ^ m).collect()).ok()
+}
+
+/// The person's own key, complete (key in the keychain, Key ID and Team ID in settings).
+fn own_key(state: &AppState) -> Option<(String, String, String)> {
+    let key_id = state.lib.setting_str("musickitKeyId").filter(|s| !s.is_empty())?;
+    let team_id = state.lib.setting_str("musickitTeamId").filter(|s| !s.is_empty())?;
+    Some((stored_key()?, key_id, team_id))
+}
 const KEYCHAIN_SERVICE: &str = "Lute & Tavern";
 const KEYCHAIN_USER: &str = "musickit-private-key";
 /// Tokens are made for 30 days and remade a day before they run out.
@@ -32,8 +49,14 @@ fn stored_key() -> Option<String> {
 pub struct Status {
     /// A token is available (built in, or made from a saved key).
     ready: bool,
-    /// The token came with this build.
+    /// This build came with Apple Music access.
     built_in: bool,
+    /// When the built-in access runs out (seconds since 1970; 0 = unknown or none).
+    built_in_until: u64,
+    /// The built-in access has run out.
+    built_in_expired: bool,
+    /// The person added their own key; it's used instead of the built-in access.
+    own_key: bool,
     key_id: String,
     team_id: String,
 }
@@ -42,8 +65,12 @@ pub struct Status {
 pub fn musickit_status(state: State<'_, AppState>) -> Status {
     let key_id = state.lib.setting_str("musickitKeyId").unwrap_or_default();
     let team_id = state.lib.setting_str("musickitTeamId").unwrap_or_default();
-    let built_in = EMBEDDED.is_some_and(|t| !t.is_empty());
-    Status { ready: built_in || (stored_key().is_some() && !key_id.is_empty() && !team_id.is_empty()), built_in, key_id, team_id }
+    let token = embedded();
+    let built_in = token.is_some();
+    let built_in_until = token.as_deref().and_then(expires).unwrap_or(0);
+    let built_in_expired = built_in && built_in_until != 0 && built_in_until <= now() + 3600;
+    let own_key = own_key(&state).is_some();
+    Status { ready: own_key || (built_in && !built_in_expired), built_in, built_in_until, built_in_expired, own_key, key_id, team_id }
 }
 
 /// Saves a MusicKit key (the .p8 file from the Apple Developer site) in the keychain.
@@ -98,15 +125,15 @@ pub fn musickit_forget_key(cache: State<'_, TokenCache>) -> Result<(), String> {
 /// The developer token MusicKit JS is configured with.
 #[tauri::command]
 pub fn musickit_token(state: State<'_, AppState>, cache: State<'_, TokenCache>) -> Result<String, String> {
-    // The token built into a release lasts at most six months (Apple's limit). Once it has run out, the
-    // person's own key (if they added one) takes over; otherwise they're told to update.
-    if let Some(t) = EMBEDDED.filter(|t| !t.is_empty()) {
-        if expires(t).is_none_or(|e| e > now() + 3600) {
-            return Ok(t.to_string());
+    // The person's own key, when they added one, is used in place of the built-in token. The built-in token
+    // lasts at most six months (Apple's limit); once it has run out they're told to update or add a key.
+    if own_key(&state).is_none()
+        && let Some(t) = embedded()
+    {
+        if expires(&t).is_none_or(|e| e > now() + 3600) {
+            return Ok(t);
         }
-        if stored_key().is_none() {
-            return Err("The Apple Music access built into this version of Lute & Tavern has expired. Update the app, or add your own MusicKit key in Settings > Apple Music.".into());
-        }
+        return Err("The Apple Music access built into this version of Lute & Tavern has expired. Update the app, or add your own MusicKit key in Settings > Music services > Apple Music.".into());
     }
     let mut c = cache.0.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((t, exp)) = c.as_ref()
@@ -153,6 +180,11 @@ mod tests {
         let b64 = base64::engine::general_purpose::STANDARD.encode(der.as_ref());
         let lines: Vec<&str> = b64.as_bytes().chunks(64).map(|c| std::str::from_utf8(c).unwrap()).collect();
         format!("-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n", lines.join("\n"))
+    }
+
+    #[test]
+    fn built_in_token_unscrambles_to_the_original() {
+        assert_eq!(super::embedded().as_deref(), option_env!("LT_MUSICKIT_TOKEN").filter(|t| !t.is_empty()));
     }
 
     #[test]

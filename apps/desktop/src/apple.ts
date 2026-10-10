@@ -9,7 +9,7 @@ declare global {
   interface Window { MusicKit: any }
 }
 
-export interface AppleStatus { ready: boolean; builtIn: boolean; keyId: string; teamId: string }
+export interface AppleStatus { ready: boolean; builtIn: boolean; builtInUntil: number; builtInExpired: boolean; ownKey: boolean; keyId: string; teamId: string }
 export const appleStatus = () => invoke<AppleStatus>('musickit_status');
 export const setAppleKey = (path: string, keyId: string, teamId: string) => invoke<void>('musickit_set_key', { path, keyId, teamId });
 export const forgetAppleKey = () => invoke<void>('musickit_forget_key');

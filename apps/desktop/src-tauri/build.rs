@@ -3,7 +3,30 @@
 //! src/lib.rs, and permissions/app-commands.toml grants all of them to the app's window.
 use std::fmt::Write;
 
+/// The Apple Music developer token for official releases (LT_MUSICKIT_TOKEN), stored scrambled so it isn't
+/// sitting in the program as readable text. Empty when the variable isn't set (everyday builds).
+fn musickit_token() {
+    println!("cargo:rerun-if-env-changed=LT_MUSICKIT_TOKEN");
+    let token = std::env::var("LT_MUSICKIT_TOKEN").unwrap_or_default();
+    let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(1) as u64 | 1;
+    let mut x = seed;
+    let mask: Vec<u8> = (0..token.len().max(1))
+        .map(|_| {
+            // xorshift64: a different mask for every build
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x >> 24) as u8
+        })
+        .collect();
+    let scrambled: Vec<u8> = token.bytes().zip(&mask).map(|(b, m)| b ^ m).collect();
+    let out = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
+    std::fs::write(out.join("musickit_token.bin"), scrambled).expect("write musickit_token.bin");
+    std::fs::write(out.join("musickit_mask.bin"), mask).expect("write musickit_mask.bin");
+}
+
 fn main() {
+    musickit_token();
     println!("cargo:rerun-if-changed=src/lib.rs");
     let src = std::fs::read_to_string("src/lib.rs").expect("src/lib.rs");
     let start = src.find("generate_handler![").expect("generate_handler! in src/lib.rs") + "generate_handler![".len();
