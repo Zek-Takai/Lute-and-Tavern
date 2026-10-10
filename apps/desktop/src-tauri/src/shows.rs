@@ -293,7 +293,9 @@ fn set_run(app: &tauri::AppHandle, f: impl FnOnce(&mut ShowsRun)) {
 pub fn songs_changed(app: &tauri::AppHandle) {
     use std::sync::atomic::Ordering;
     use tauri::Manager;
-    let lib = app.state::<AppState>().lib.clone();
+    // library events can arrive before the library is open; there's nothing to do yet then
+    let Some(state) = app.try_state::<AppState>() else { return };
+    let lib = state.lib.clone();
     if !auto_on(&lib) || python_exe(&lib).is_none() {
         return;
     }

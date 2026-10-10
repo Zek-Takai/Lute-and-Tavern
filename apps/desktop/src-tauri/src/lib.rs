@@ -466,7 +466,6 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("lt", protocol::handle)
         .setup(|app| {
             main_window(app)?;
-            shows::songs_changed(app.handle());
             if let Err(e) = relay::start(app.handle()) {
                 log::write("error", &e);
             }
@@ -504,6 +503,7 @@ pub fn run() {
                 }
             };
             app.manage(AppState { lib, watcher: watch::Watcher::default() });
+            shows::songs_changed(app.handle());
             if app.state::<AppState>().lib.setting_bool("mcpEnabled") {
                 if let Err(e) = mcp::start(app.handle()) {
                     log::write("error", &format!("MCP server: {e}"));
